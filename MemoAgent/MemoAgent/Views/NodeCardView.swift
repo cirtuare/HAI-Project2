@@ -55,10 +55,6 @@ struct NodeCardView: View {
     var isConnectionTarget: Bool = false
     let searchOpacity: Double
 
-    /// Called by the canvas when the user clicks (without dragging).
-    var onTap: () -> Void = {}
-    /// Called by the canvas when ⌘-click occurs.
-    var onCommandTap: () -> Void = {}
     /// Called when the user selects "삭제" from the context menu.
     var onDelete: () -> Void = {}
 
@@ -70,15 +66,11 @@ struct NodeCardView: View {
 
     init(node: GraphNode, isSelected: Bool, isConnectionTarget: Bool = false,
          searchOpacity: Double,
-         onTap: @escaping () -> Void = {},
-         onCommandTap: @escaping () -> Void = {},
          onDelete: @escaping () -> Void = {}) {
         self.node = node
         self.isSelected = isSelected
         self.isConnectionTarget = isConnectionTarget
         self.searchOpacity = searchOpacity
-        self.onTap = onTap
-        self.onCommandTap = onCommandTap
         self.onDelete = onDelete
         self.style = NodeTypeStyle.style(for: node.type)
         self.cardWidth = node.isImportant ? 240 : 210

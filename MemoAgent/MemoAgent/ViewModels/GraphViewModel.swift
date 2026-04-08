@@ -66,7 +66,7 @@ struct ExtractedNodeData {
 /// A collection of extracted nodes from a single piece of text.
 @Generable
 struct ExtractedKnowledgeGraph {
-    @Guide(description: "List of distinct knowledge nodes extracted from the input text. Aim for 1–5 nodes.")
+    @Guide(description: "List of distinct knowledge nodes extracted from the input text. Extract at most 3 nodes. Aim for 1–3 concise nodes.")
     var nodes: [ExtractedNodeData]
 }
 
@@ -277,6 +277,13 @@ final class GraphViewModel {
     /// Key = node ID, Value = CGPoint in canvas-space.
     private var dragStartPositions: [String: CGPoint] = [:]
 
+    /// Screen-space translation of the current drag gesture (set by the View).
+    /// EdgeLayerView reads this to offset node positions while dragging.
+    var liveDragTranslation: CGSize = .zero
+
+    /// IDs of nodes currently being dragged (the drag group).
+    var liveDragNodeIDs: Set<String> = []
+
     // ─────────────────────────────────────────────
     // MARK: - Selection Methods
     // ─────────────────────────────────────────────
@@ -322,10 +329,12 @@ final class GraphViewModel {
     /// Call when a drag gesture begins on a node.
     func beginDrag(nodeID: String) {
         isDraggingNode = true
+        liveDragTranslation = .zero
         // Snapshot positions of ALL selected nodes (group-drag support).
         let dragGroup = selectedNodeIDs.contains(nodeID)
             ? selectedNodeIDs
             : [nodeID]
+        liveDragNodeIDs = dragGroup
         for id in dragGroup {
             if let node = nodes.first(where: { $0.id == id }) {
                 dragStartPositions[id] = node.position
@@ -333,8 +342,18 @@ final class GraphViewModel {
         }
     }
 
-    /// Call on every gesture update; `delta` is in canvas-space points.
-    func updateDrag(nodeID: String, delta: CGSize) {
+    /// Returns the canvas-space position for a node offset by a drag delta.
+    /// Views call this to compute the display position without mutating `nodes`.
+    func draggedPosition(nodeID: String, delta: CGSize) -> CGPoint? {
+        guard let start = dragStartPositions[nodeID] else { return nil }
+        return CGPoint(x: start.x + delta.width, y: start.y + delta.height)
+    }
+
+    /// Commits the final drag delta to `nodes` and ends the drag.
+    func commitDrag(nodeID: String, delta: CGSize) {
+        isDraggingNode = false
+        liveDragTranslation = .zero
+        liveDragNodeIDs = []
         let dragGroup = selectedNodeIDs.contains(nodeID)
             ? selectedNodeIDs
             : [nodeID]
@@ -345,19 +364,9 @@ final class GraphViewModel {
                 x: start.x + delta.width,
                 y: start.y + delta.height
             )
-        }
-    }
-
-    /// Call when a drag gesture ends.
-    func endDrag(nodeID: String) {
-        isDraggingNode = false
-        let dragGroup = selectedNodeIDs.contains(nodeID)
-            ? selectedNodeIDs
-            : [nodeID]
-        for id in dragGroup {
             dragStartPositions.removeValue(forKey: id)
         }
-        persistGraph()  // save final positions
+        persistGraph()
     }
 
     // ─────────────────────────────────────────────
@@ -563,7 +572,7 @@ final class GraphViewModel {
                 )
 
                 await MainActor.run {
-                    modalAnalysedNodes = response.content.nodes
+                    modalAnalysedNodes = Array(response.content.nodes.prefix(3))
                     modalProcessStep = .done
                 }
             } catch {

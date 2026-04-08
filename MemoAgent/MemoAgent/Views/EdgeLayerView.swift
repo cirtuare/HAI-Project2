@@ -46,36 +46,27 @@ struct EdgeLayerView: View {
     // ─────────────────────────────────────────────
 
     private var edgeCanvas: some View {
-        TimelineView(.animation(minimumInterval: 1/30)) { timeline in
+        ZStack {
+            // Layer 1: solid + dashed (non-animated) edges — redraws instantly on node move
             Canvas { context, _ in
-                let t = timeline.date.timeIntervalSinceReferenceDate
                 for edge in vm.visibleEdges {
+                    guard !edge.style.animated else { continue }
                     guard let src = vm.nodes.first(where: { $0.id == edge.sourceID }),
                           let tgt = vm.nodes.first(where: { $0.id == edge.targetID })
                     else { continue }
 
                     let (p0, p3) = bestEndpoints(src: src, tgt: tgt)
                     let path = bezierPath(from: p0, to: p3)
-
                     let isHovered   = vm.hoveredEdgeID == edge.id
                     let strokeColor = edgeColor(edge: edge, hovered: isHovered)
                     let lineWidth   = edgeLineWidth(edge: edge, hovered: isHovered)
 
-                    if edge.style.isUserCreated || edge.style.animated {
-                        let dashLength: CGFloat = 5
-                        let gapLength:  CGFloat = 5
-                        let phase = edge.style.animated
-                            ? CGFloat(t.truncatingRemainder(dividingBy: 1.0)) * (dashLength + gapLength) * -1
-                            : 0
+                    if edge.style.isUserCreated {
                         context.stroke(
                             path,
                             with: .color(strokeColor),
-                            style: StrokeStyle(
-                                lineWidth: lineWidth,
-                                lineCap: .round,
-                                dash: [dashLength, gapLength],
-                                dashPhase: phase
-                            )
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round,
+                                               dash: [5, 5], dashPhase: 0)
                         )
                     } else {
                         context.stroke(
@@ -83,6 +74,35 @@ struct EdgeLayerView: View {
                             with: .color(strokeColor),
                             style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
                         )
+                    }
+                }
+            }
+
+            // Layer 2: animated (marching-ants) edges — TimelineView only when needed
+            if vm.visibleEdges.contains(where: { $0.style.animated }) {
+                TimelineView(.animation(minimumInterval: 1/30)) { timeline in
+                    Canvas { context, _ in
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                        for edge in vm.visibleEdges where edge.style.animated {
+                            guard let src = vm.nodes.first(where: { $0.id == edge.sourceID }),
+                                  let tgt = vm.nodes.first(where: { $0.id == edge.targetID })
+                            else { continue }
+
+                            let (p0, p3) = bestEndpoints(src: src, tgt: tgt)
+                            let path = bezierPath(from: p0, to: p3)
+                            let isHovered   = vm.hoveredEdgeID == edge.id
+                            let strokeColor = edgeColor(edge: edge, hovered: isHovered)
+                            let lineWidth   = edgeLineWidth(edge: edge, hovered: isHovered)
+                            let dashLength: CGFloat = 5
+                            let gapLength:  CGFloat = 5
+                            let phase = CGFloat(t.truncatingRemainder(dividingBy: 1.0)) * (dashLength + gapLength) * -1
+                            context.stroke(
+                                path,
+                                with: .color(strokeColor),
+                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round,
+                                                   dash: [dashLength, gapLength], dashPhase: phase)
+                            )
+                        }
                     }
                 }
             }
@@ -140,11 +160,21 @@ struct EdgeLayerView: View {
     // MARK: Geometry — nearest-face endpoint selection
     // ─────────────────────────────────────────────
 
+    /// Returns the live screen-space center of a node, accounting for any in-progress drag offset.
+    private func liveCenter(for node: GraphNode) -> CGPoint {
+        var pt = vm.screenPoint(from: node.position, canvasSize: canvasSize)
+        if vm.liveDragNodeIDs.contains(node.id) {
+            pt.x += vm.liveDragTranslation.width
+            pt.y += vm.liveDragTranslation.height
+        }
+        return pt
+    }
+
     /// Chooses the best pair of connection points on each card border
     /// so the line always exits from the face nearest the other node.
     private func bestEndpoints(src: GraphNode, tgt: GraphNode) -> (CGPoint, CGPoint) {
-        let srcCenter = vm.screenPoint(from: src.position, canvasSize: canvasSize)
-        let tgtCenter = vm.screenPoint(from: tgt.position, canvasSize: canvasSize)
+        let srcCenter = liveCenter(for: src)
+        let tgtCenter = liveCenter(for: tgt)
         let s = vm.canvasScale
 
         let srcW = CardMetrics.width(for: src)  * s
@@ -274,6 +304,10 @@ private struct EdgeInteractionOverlay: View {
                 }
             }
             .animation(.spring(response: 0.18, dampingFraction: 0.7), value: isHovered)
+            // Dismiss when canvas clears hoveredEdgeID (e.g. background tap)
+            .onChange(of: vm.hoveredEdgeID) { _, newID in
+                if newID != edge.id { isHovered = false }
+            }
         }
     }
 
@@ -359,13 +393,22 @@ private struct EdgeInteractionOverlay: View {
 
     // MARK: Geometry helpers
 
+    private func liveCenter(for node: GraphNode) -> CGPoint {
+        var pt = vm.screenPoint(from: node.position, canvasSize: canvasSize)
+        if vm.liveDragNodeIDs.contains(node.id) {
+            pt.x += vm.liveDragTranslation.width
+            pt.y += vm.liveDragTranslation.height
+        }
+        return pt
+    }
+
     private func edgeEndpoints() -> (CGPoint, CGPoint) {
         guard let src = vm.nodes.first(where: { $0.id == edge.sourceID }),
               let tgt = vm.nodes.first(where: { $0.id == edge.targetID })
         else { return (.zero, .zero) }
 
-        let srcCenter = vm.screenPoint(from: src.position, canvasSize: canvasSize)
-        let tgtCenter = vm.screenPoint(from: tgt.position, canvasSize: canvasSize)
+        let srcCenter = liveCenter(for: src)
+        let tgtCenter = liveCenter(for: tgt)
         let s = vm.canvasScale
 
         let srcHW = CardMetrics.width(for: src)  * s / 2

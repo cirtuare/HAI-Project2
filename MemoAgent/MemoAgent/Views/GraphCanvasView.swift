@@ -8,6 +8,8 @@ struct GraphCanvasView: View {
 
     // Which node is currently being moved
     @State private var draggingNodeID: String? = nil
+    // Live drag translation in screen-space (converted to canvas-space for display)
+    @State private var dragTranslation: CGSize = .zero
     // Did the current gesture travel far enough to count as a drag (not a tap)?
     @State private var didDrag = false
     // Which node started a connection drag
@@ -36,6 +38,7 @@ struct GraphCanvasView: View {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     vm.clearSelection()
                     vm.cancelConnection()
+                    vm.hoveredEdgeID = nil
                 }
             }
         }
@@ -47,7 +50,16 @@ struct GraphCanvasView: View {
 
     private func nodeLayer(canvasSize: CGSize) -> some View {
         ForEach(vm.visibleNodes) { node in
-            let screenPos  = vm.screenPoint(from: node.position, canvasSize: canvasSize)
+            // During drag, offset position locally without mutating vm.nodes
+            let isDraggingThis = draggingNodeID == node.id ||
+                (vm.selectedNodeIDs.contains(node.id) && draggingNodeID != nil && vm.selectedNodeIDs.contains(draggingNodeID ?? ""))
+            let basePos = vm.screenPoint(from: node.position, canvasSize: canvasSize)
+            let screenPos: CGPoint = isDraggingThis
+                ? CGPoint(
+                    x: basePos.x + dragTranslation.width,
+                    y: basePos.y + dragTranslation.height
+                  )
+                : basePos
             let isSelected = vm.selectedNodeIDs.contains(node.id)
             let isTarget   = vm.connectingTargetNodeID == node.id
 
@@ -57,26 +69,6 @@ struct GraphCanvasView: View {
                     isSelected: isSelected,
                     isConnectionTarget: isTarget,
                     searchOpacity: vm.searchOpacity(for: node),
-                    onTap: {
-                        // Suppress tap if this was the end of a drag
-                        guard !didDrag else { return }
-                        if vm.connectingFromNodeID != nil {
-                            vm.connectingTargetNodeID = node.id
-                            withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
-                                vm.finishConnection()
-                            }
-                        } else {
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                                vm.selectNode(node.id, openInspector: true)
-                            }
-                        }
-                    },
-                    onCommandTap: {
-                        guard !didDrag else { return }
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            vm.toggleSelection(of: node.id)
-                        }
-                    },
                     onDelete: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             vm.deleteNode(id: node.id)
@@ -92,6 +84,22 @@ struct GraphCanvasView: View {
             .gesture(nodeMoveDragGesture(nodeID: node.id, canvasSize: canvasSize))
             .simultaneousGesture(
                 TapGesture()
+                    .onEnded {
+                        guard !didDrag else { return }
+                        if vm.connectingFromNodeID != nil {
+                            vm.connectingTargetNodeID = node.id
+                            withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
+                                vm.finishConnection()
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                vm.selectNode(node.id, openInspector: true)
+                            }
+                        }
+                    }
+            )
+            .simultaneousGesture(
+                TapGesture()
                     .modifiers(.command)
                     .onEnded {
                         guard !didDrag else { return }
@@ -101,8 +109,6 @@ struct GraphCanvasView: View {
                     }
             )
             .zIndex(isSelected ? 10 : (isTarget ? 9 : 1))
-            // Disable position animation during drag to prevent lag
-            .animation(vm.isDraggingNode ? nil : .spring(response: 0.3, dampingFraction: 0.75), value: screenPos)
         }
     }
 
@@ -144,26 +150,30 @@ struct GraphCanvasView: View {
     private func nodeMoveDragGesture(nodeID: String, canvasSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { value in
-                // Mark that a real drag occurred so the tap handler is suppressed
                 if !didDrag {
                     didDrag = true
                     draggingNodeID = nodeID
+                    dragTranslation = .zero
                     if !vm.selectedNodeIDs.contains(nodeID) {
                         vm.selectNode(nodeID)
                     }
                     vm.beginDrag(nodeID: nodeID)
                 }
                 guard draggingNodeID == nodeID else { return }
-                let delta = CGSize(
+                // Store raw screen-space translation; screenPos offset applied in nodeLayer
+                dragTranslation = value.translation
+                vm.liveDragTranslation = value.translation
+            }
+            .onEnded { value in
+                guard draggingNodeID == nodeID else { return }
+                // Commit final canvas-space delta to vm only once at drag end
+                let canvasDelta = CGSize(
                     width:  value.translation.width  / vm.canvasScale,
                     height: value.translation.height / vm.canvasScale
                 )
-                vm.updateDrag(nodeID: nodeID, delta: delta)
-            }
-            .onEnded { _ in
-                vm.endDrag(nodeID: nodeID)
+                vm.commitDrag(nodeID: nodeID, delta: canvasDelta)
                 draggingNodeID = nil
-                // Small delay so the tap gesture below us doesn't fire
+                dragTranslation = .zero
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     didDrag = false
                 }

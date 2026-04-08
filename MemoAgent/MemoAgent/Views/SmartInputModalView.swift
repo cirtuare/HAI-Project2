@@ -388,60 +388,64 @@ struct SmartInputModalView: View {
 
             Divider()
 
-            // Discovered nodes
-            VStack(alignment: .leading, spacing: 10) {
-                if vm.modalProcessStep == .done {
-                    // Show real AI-analysed nodes
-                    if let errorMsg = vm.modalAIError {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .font(.system(size: 12))
-                            Text(errorMsg)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Color.white.opacity(0.6))
-                                .lineLimit(3)
+            // Discovered nodes — scrollable, fills remaining space
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if vm.modalProcessStep == .done {
+                        // Show real AI-analysed nodes
+                        if let errorMsg = vm.modalAIError {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                    .font(.system(size: 12))
+                                Text(errorMsg)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.white.opacity(0.6))
+                                    .lineLimit(3)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.orange.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .strokeBorder(Color.orange.opacity(0.2), lineWidth: 0.5)
+                                    )
+                            )
                         }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.orange.opacity(0.08))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(Color.orange.opacity(0.2), lineWidth: 0.5)
-                                )
-                        )
+                        ForEach(Array(vm.modalAnalysedNodes.enumerated()), id: \.offset) { idx, node in
+                            processingNodeCard(
+                                title: node.title,
+                                summary: node.summary,
+                                tags: node.tags,
+                                isImportant: node.isImportant,
+                                delay: Double(idx) * 0.25
+                            )
+                        }
+                    } else if vm.modalProcessStep != .idle {
+                        // Still analysing (.extracting or .chunking) — show a spinner
+                        HStack(spacing: 10) {
+                            ProgressSpinner()
+                                .foregroundStyle(.cyan)
+                            Text("Apple Intelligence가 노드를 추출하고 있습니다…")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.white.opacity(0.5))
+                        }
+                        .padding(12)
                     }
-                    ForEach(Array(vm.modalAnalysedNodes.enumerated()), id: \.offset) { idx, node in
-                        processingNodeCard(
-                            title: node.title,
-                            summary: node.summary,
-                            tags: node.tags,
-                            isImportant: node.isImportant,
-                            delay: Double(idx) * 0.25
-                        )
-                    }
-                } else if vm.modalProcessStep != .idle {
-                    // Still analysing (.extracting or .chunking) — show a spinner
-                    HStack(spacing: 10) {
-                        ProgressSpinner()
-                            .foregroundStyle(.cyan)
-                        Text("Apple Intelligence가 노드를 추출하고 있습니다…")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.white.opacity(0.5))
-                    }
-                    .padding(12)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Spacer()
-
-            // Completion CTA
+            // Completion CTA — pinned to bottom
             if vm.modalProcessStep == .done {
+                Divider()
                 completionFooter
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: vm.modalProcessStep)
     }
 
