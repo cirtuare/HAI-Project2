@@ -31,7 +31,10 @@ struct ContentView: View {
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             mainContent
-                .inspector(isPresented: .constant(vm.isInspectorPresented)) {
+                .inspector(isPresented: Binding(
+                    get: { vm.isInspectorPresented },
+                    set: { vm.isInspectorPresented = $0 }
+                )) {
                     DetailInspectorView()
                         .inspectorColumnWidth(min: 300, ideal: 360, max: 420)
                 }

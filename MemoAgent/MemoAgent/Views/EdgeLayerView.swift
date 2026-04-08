@@ -30,8 +30,10 @@ struct EdgeLayerView: View {
         ZStack {
             // Static Bezier paths drawn on a Canvas for performance
             edgeCanvas
-            // Interactive delete buttons rendered as SwiftUI views
-            edgeDeleteButtons
+            // Interactive delete buttons — hidden during node drag to reduce layout overhead
+            if !vm.isDraggingNode {
+                edgeDeleteButtons
+            }
             // Live pending edge while connecting
             if vm.connectingFromNodeID != nil {
                 pendingEdgeCanvas

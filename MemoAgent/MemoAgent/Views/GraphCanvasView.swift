@@ -67,7 +67,7 @@ struct GraphCanvasView: View {
                             }
                         } else {
                             withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                                vm.selectNode(node.id)
+                                vm.selectNode(node.id, openInspector: true)
                             }
                         }
                     },
@@ -101,7 +101,8 @@ struct GraphCanvasView: View {
                     }
             )
             .zIndex(isSelected ? 10 : (isTarget ? 9 : 1))
-            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: screenPos)
+            // Disable position animation during drag to prevent lag
+            .animation(vm.isDraggingNode ? nil : .spring(response: 0.3, dampingFraction: 0.75), value: screenPos)
         }
     }
 

@@ -220,7 +220,12 @@ final class GraphViewModel {
     // ─────────────────────────────────────────────
 
     /// Whether the detail inspector panel is presented.
-    var isInspectorPresented: Bool { !selectedNodeIDs.isEmpty }
+    /// Only set to true on explicit tap (not during drag).
+    var isInspectorPresented: Bool = false
+
+    /// Whether a node drag is currently in progress.
+    /// Used to suppress animation and inspector opening during drag.
+    var isDraggingNode: Bool = false
 
     // ─────────────────────────────────────────────
     // MARK: SmartInput Modal State
@@ -280,27 +285,33 @@ final class GraphViewModel {
     func toggleSelection(of nodeID: String) {
         if selectedNodeIDs.contains(nodeID) {
             selectedNodeIDs.remove(nodeID)
+            if selectedNodeIDs.isEmpty { isInspectorPresented = false }
         } else {
             selectedNodeIDs.insert(nodeID)
+            isInspectorPresented = true
         }
         resetPromptComposer()
     }
 
     /// Select exactly one node, clearing any previous selection.
-    func selectNode(_ nodeID: String) {
+    /// Pass `openInspector: true` only on tap (not during drag start).
+    func selectNode(_ nodeID: String, openInspector: Bool = false) {
         selectedNodeIDs = [nodeID]
+        if openInspector { isInspectorPresented = true }
         resetPromptComposer()
     }
 
     /// Deselect a single node (used by the "×" chip in the DetailDrawer).
     func deselectNode(_ nodeID: String) {
         selectedNodeIDs.remove(nodeID)
+        if selectedNodeIDs.isEmpty { isInspectorPresented = false }
         resetPromptComposer()
     }
 
     /// Clear the entire selection (e.g. clicking empty canvas space).
     func clearSelection() {
         selectedNodeIDs.removeAll()
+        isInspectorPresented = false
         resetPromptComposer()
     }
 
@@ -310,6 +321,7 @@ final class GraphViewModel {
 
     /// Call when a drag gesture begins on a node.
     func beginDrag(nodeID: String) {
+        isDraggingNode = true
         // Snapshot positions of ALL selected nodes (group-drag support).
         let dragGroup = selectedNodeIDs.contains(nodeID)
             ? selectedNodeIDs
@@ -338,6 +350,7 @@ final class GraphViewModel {
 
     /// Call when a drag gesture ends.
     func endDrag(nodeID: String) {
+        isDraggingNode = false
         let dragGroup = selectedNodeIDs.contains(nodeID)
             ? selectedNodeIDs
             : [nodeID]
@@ -413,6 +426,7 @@ final class GraphViewModel {
         nodes.removeAll { $0.id == id }
         edges.removeAll { $0.sourceID == id || $0.targetID == id }
         selectedNodeIDs.remove(id)
+        if selectedNodeIDs.isEmpty { isInspectorPresented = false }
         persistGraph()
     }
 
