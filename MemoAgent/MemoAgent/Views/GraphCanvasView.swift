@@ -30,6 +30,18 @@ struct GraphCanvasView: View {
 
                 nodeLayer(canvasSize: size)
 
+                // Bug fix #2: edge action buttons rendered above node layer
+                if !vm.isDraggingNode {
+                    EdgeInteractionLayer(canvasSize: size)
+                }
+
+                // Bug fix #3: relationship editor as a centered popup above all layers
+                if let editID = vm.editingRelationshipEdgeID {
+                    RelationshipPopup(edgeID: editID)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .animation(.spring(response: 0.2, dampingFraction: 0.8), value: editID)
+                }
+
                 FloatingActionsView()
             }
             .gesture(canvasPanGesture)
@@ -39,6 +51,7 @@ struct GraphCanvasView: View {
                     vm.clearSelection()
                     vm.cancelConnection()
                     vm.hoveredEdgeID = nil
+                    vm.editingRelationshipEdgeID = nil
                 }
             }
         }

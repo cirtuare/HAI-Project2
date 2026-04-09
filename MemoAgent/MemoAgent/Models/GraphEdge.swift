@@ -28,11 +28,15 @@ struct GraphEdge: Identifiable, Hashable, Codable {
     let id: String
     var sourceID: String
     var targetID: String
+    var relationship: String
     var style: EdgeStyle
 
-    // MARK: - Hashable
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
+    init(id: String, sourceID: String, targetID: String, relationship: String = "", style: EdgeStyle) {
+        self.id = id
+        self.sourceID = sourceID
+        self.targetID = targetID
+        self.relationship = relationship
+        self.style = style
     }
 
     static func == (lhs: GraphEdge, rhs: GraphEdge) -> Bool {

@@ -9,7 +9,7 @@
 import SwiftUI
 
 // MARK: - Constants
- 
+
 /// Card dimensions in canvas-space points (unscaled).
 private enum CardMetrics {
     static func width(for node: GraphNode) -> CGFloat  { node.isImportant ? 240 : 210 }
@@ -18,8 +18,9 @@ private enum CardMetrics {
 
 // MARK: - EdgeLayerView
 
-/// Full-size transparent overlay that renders all graph edges.
+/// Full-size transparent overlay that renders all graph edges (paths only).
 /// Placed beneath the node layer inside the canvas ZStack.
+/// Action buttons are rendered separately in EdgeInteractionLayer above nodes.
 struct EdgeLayerView: View {
     @Environment(GraphViewModel.self) private var vm
 
@@ -30,13 +31,22 @@ struct EdgeLayerView: View {
         ZStack {
             // Static Bezier paths drawn on a Canvas for performance
             edgeCanvas
-            // Interactive delete buttons — hidden during node drag to reduce layout overhead
-            if !vm.isDraggingNode {
-                edgeDeleteButtons
-            }
             // Live pending edge while connecting
             if vm.connectingFromNodeID != nil {
                 pendingEdgeCanvas
+            }
+        }
+        // Track mouse position across the full canvas to detect edge proximity
+        .onContinuousHover { phase in
+            guard !vm.isDraggingNode, vm.connectingFromNodeID == nil else {
+                vm.hoveredEdgeID = nil
+                return
+            }
+            switch phase {
+            case .active(let location):
+                vm.hoveredEdgeID = findNearestEdge(at: location)
+            case .ended:
+                vm.hoveredEdgeID = nil
             }
         }
     }
@@ -74,6 +84,19 @@ struct EdgeLayerView: View {
                             with: .color(strokeColor),
                             style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
                         )
+                    }
+
+                    if !edge.relationship.isEmpty {
+                        let mid = bezierMidpoint(from: p0, to: p3)
+                        let text = context.resolve(Text(edge.relationship).font(.system(size: 10, weight: .bold)))
+
+                        let textSize = text.measure(in: CGSize(width: 100, height: 20))
+                        let rect = CGRect(x: mid.x - textSize.width/2 - 4,
+                                        y: mid.y - textSize.height/2 - 2,
+                                        width: textSize.width + 8, height: textSize.height + 4)
+
+                        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Color(hex: "1e293b")))
+                        context.draw(text, at: mid)
                     }
                 }
             }
@@ -121,14 +144,12 @@ struct EdgeLayerView: View {
                   let src = vm.nodes.first(where: { $0.id == srcID })
             else { return }
 
-            // Start from the nearest face of the source card toward the drag point
             let srcCenter = vm.screenPoint(from: src.position, canvasSize: canvasSize)
             let start = nearestBorderPoint(nodeCenter: srcCenter, node: src,
                                            toward: dragPt)
 
             let path = bezierPath(from: start, to: dragPt)
 
-            // Dashed cyan line while dragging
             context.stroke(
                 path,
                 with: .color(Color.cyan.opacity(0.7)),
@@ -139,7 +160,6 @@ struct EdgeLayerView: View {
                 )
             )
 
-            // Small circle at drag tip
             let tipRect = CGRect(x: dragPt.x - 4, y: dragPt.y - 4, width: 8, height: 8)
             context.fill(Path(ellipseIn: tipRect), with: .color(Color.cyan.opacity(0.8)))
         }
@@ -147,20 +167,56 @@ struct EdgeLayerView: View {
     }
 
     // ─────────────────────────────────────────────
-    // MARK: Invisible hit-test overlays + delete buttons
+    // MARK: Nearest-edge detection via mouse tracking
     // ─────────────────────────────────────────────
 
-    private var edgeDeleteButtons: some View {
-        ForEach(vm.visibleEdges) { edge in
-            EdgeInteractionOverlay(edge: edge, canvasSize: canvasSize)
+    /// Returns the ID of the edge whose bezier curve is within `threshold` pts of `point`.
+    private func findNearestEdge(at point: CGPoint) -> String? {
+        let threshold: CGFloat = 20
+        for edge in vm.visibleEdges {
+            guard let src = vm.nodes.first(where: { $0.id == edge.sourceID }),
+                  let tgt = vm.nodes.first(where: { $0.id == edge.targetID })
+            else { continue }
+            let (p0, p3) = bestEndpoints(src: src, tgt: tgt)
+            if distanceToBezier(point, p0: p0, p3: p3) < threshold {
+                return edge.id
+            }
         }
+        return nil
+    }
+
+    /// Approximates the minimum distance from `point` to the cubic bezier curve
+    /// by sampling 40 evenly-spaced points along the curve.
+    private func distanceToBezier(_ point: CGPoint, p0: CGPoint, p3: CGPoint) -> CGFloat {
+        let dx = p3.x - p0.x
+        let dy = p3.y - p0.y
+        let dist = max(sqrt(dx*dx + dy*dy), 40)
+        let ctrl = min(dist * 0.45, 180.0)
+        let absDX = abs(dx), absDY = abs(dy)
+        let c1: CGPoint, c2: CGPoint
+        if absDY > absDX {
+            c1 = CGPoint(x: p0.x, y: p0.y + ctrl * (dy > 0 ? 1 : -1))
+            c2 = CGPoint(x: p3.x, y: p3.y - ctrl * (dy > 0 ? 1 : -1))
+        } else {
+            c1 = CGPoint(x: p0.x + ctrl * (dx > 0 ? 1 : -1), y: p0.y)
+            c2 = CGPoint(x: p3.x - ctrl * (dx > 0 ? 1 : -1), y: p3.y)
+        }
+        var minD = CGFloat.infinity
+        for i in 0...40 {
+            let t  = CGFloat(i) / 40
+            let mt = 1 - t
+            let x  = mt*mt*mt*p0.x + 3*mt*mt*t*c1.x + 3*mt*t*t*c2.x + t*t*t*p3.x
+            let y  = mt*mt*mt*p0.y + 3*mt*mt*t*c1.y + 3*mt*t*t*c2.y + t*t*t*p3.y
+            let d  = hypot(point.x - x, point.y - y)
+            if d < minD { minD = d }
+        }
+        return minD
     }
 
     // ─────────────────────────────────────────────
     // MARK: Geometry — nearest-face endpoint selection
     // ─────────────────────────────────────────────
 
-    /// Returns the live screen-space center of a node, accounting for any in-progress drag offset.
     private func liveCenter(for node: GraphNode) -> CGPoint {
         var pt = vm.screenPoint(from: node.position, canvasSize: canvasSize)
         if vm.liveDragNodeIDs.contains(node.id) {
@@ -170,8 +226,6 @@ struct EdgeLayerView: View {
         return pt
     }
 
-    /// Chooses the best pair of connection points on each card border
-    /// so the line always exits from the face nearest the other node.
     private func bestEndpoints(src: GraphNode, tgt: GraphNode) -> (CGPoint, CGPoint) {
         let srcCenter = liveCenter(for: src)
         let tgtCenter = liveCenter(for: tgt)
@@ -191,10 +245,6 @@ struct EdgeLayerView: View {
         return (p0, p3)
     }
 
-    /// Returns the point on the card border closest to `target`.
-    /// Picks among the four cardinal face centres (top/bottom/left/right)
-    /// and returns the one whose face direction most closely aligns with the
-    /// vector from `nodeCenter` to `target`.
     private func nearestBorderPoint(nodeCenter: CGPoint, node: GraphNode,
                                     toward target: CGPoint) -> CGPoint {
         let s = vm.canvasScale
@@ -208,43 +258,27 @@ struct EdgeLayerView: View {
                                     toward target: CGPoint) -> CGPoint {
         let dx = target.x - nodeCenter.x
         let dy = target.y - nodeCenter.y
-
-        // Clamp to card border using the aspect-ratio of the direction vector
         if abs(dx) < 1 && abs(dy) < 1 { return nodeCenter }
-
-        let tx = (dx == 0) ? .infinity : halfW / abs(dx)
-        let ty = (dy == 0) ? .infinity : halfH / abs(dy)
+        let tx = (dx == 0) ? CGFloat.infinity : halfW / abs(dx)
+        let ty = (dy == 0) ? CGFloat.infinity : halfH / abs(dy)
         let t  = min(tx, ty)
-
         return CGPoint(x: nodeCenter.x + dx * t,
                        y: nodeCenter.y + dy * t)
     }
 
-    /// Cubic Bezier with control points tangent to the exit direction.
     private func bezierPath(from start: CGPoint, to end: CGPoint) -> Path {
         let dx = end.x - start.x
         let dy = end.y - start.y
         let dist = max(sqrt(dx*dx + dy*dy), 40)
-        // Control point distance scales with chord length (capped)
         let ctrl = min(dist * 0.45, 180.0)
-
-        // Determine dominant axis at each end by looking at direction
-        let c1: CGPoint
-        let c2: CGPoint
-
-        let absDX = abs(dx)
-        let absDY = abs(dy)
-
-        if absDY > absDX {
-            // Mostly vertical — curve vertically
+        let c1: CGPoint, c2: CGPoint
+        if abs(dy) > abs(dx) {
             c1 = CGPoint(x: start.x, y: start.y + ctrl * (dy > 0 ? 1 : -1))
             c2 = CGPoint(x: end.x,   y: end.y   - ctrl * (dy > 0 ? 1 : -1))
         } else {
-            // Mostly horizontal — curve horizontally
             c1 = CGPoint(x: start.x + ctrl * (dx > 0 ? 1 : -1), y: start.y)
             c2 = CGPoint(x: end.x   - ctrl * (dx > 0 ? 1 : -1), y: end.y)
         }
-
         return Path { p in
             p.move(to: start)
             p.addCurve(to: end, control1: c1, control2: c2)
@@ -256,8 +290,8 @@ struct EdgeLayerView: View {
     // ─────────────────────────────────────────────
 
     private func edgeColor(edge: GraphEdge, hovered: Bool) -> Color {
-        if hovered                  { return Color(hex: "64748b") }  // slate-500
-        if edge.style.isUserCreated { return Color(hex: "38bdf8") }  // sky-400 (user edges in cyan)
+        if hovered                  { return Color(hex: "64748b") }
+        if edge.style.isUserCreated { return Color(hex: "38bdf8") }
         switch Int(edge.style.strokeWidth) {
         case 3:  return Color(hex: "64748b")
         case 1:  return Color(hex: "334155")
@@ -270,52 +304,55 @@ struct EdgeLayerView: View {
     }
 }
 
-// MARK: - EdgeInteractionOverlay
+// MARK: - EdgeInteractionLayer
 
-/// Renders an invisible wide stroke over the edge for hit-testing,
-/// plus the floating "삭제" delete button on hover.
-private struct EdgeInteractionOverlay: View {
+/// Action buttons for edges — rendered above the node layer so buttons are always clickable.
+struct EdgeInteractionLayer: View {
+    @Environment(GraphViewModel.self) private var vm
+    let canvasSize: CGSize
+
+    var body: some View {
+        ForEach(vm.visibleEdges) { edge in
+            EdgeActionButtons(edge: edge, canvasSize: canvasSize)
+        }
+    }
+}
+
+// MARK: - EdgeActionButtons
+
+/// Shows the floating action panel (관계 설정 / 실선-점선 / 흐름 / 삭제) when this edge is hovered.
+/// Visibility is driven by `vm.hoveredEdgeID` — no local hover state needed.
+private struct EdgeActionButtons: View {
     @Environment(GraphViewModel.self) private var vm
     let edge: GraphEdge
     let canvasSize: CGSize
 
-    @State private var isHovered = false
-
     var body: some View {
-        GeometryReader { _ in
-            let (p0, p3) = edgeEndpoints()
-            let midpoint  = bezierMidpoint(from: p0, to: p3)
-            let path      = bezierPath(from: p0, to: p3)
+        let (p0, p3) = edgeEndpoints()
+        let midpoint  = bezierMidpoint(from: p0, to: p3)
 
-            ZStack {
-                // Wide transparent stroke for easy hover/click
-                path
-                    .stroke(Color.clear, lineWidth: 20)
-                    .contentShape(path.stroke(lineWidth: 20))
-                    .onHover { hovering in
-                        isHovered = hovering
-                        vm.hoveredEdgeID = hovering ? edge.id : nil
-                    }
-
-                // Delete button
-                if isHovered {
-                    deleteButton(at: midpoint)
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
-                }
-            }
-            .animation(.spring(response: 0.18, dampingFraction: 0.7), value: isHovered)
-            // Dismiss when canvas clears hoveredEdgeID (e.g. background tap)
-            .onChange(of: vm.hoveredEdgeID) { _, newID in
-                if newID != edge.id { isHovered = false }
+        ZStack {
+            if vm.hoveredEdgeID == edge.id {
+                actionPanel(at: midpoint)
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
             }
         }
+        .animation(.spring(response: 0.18, dampingFraction: 0.7),
+                   value: vm.hoveredEdgeID == edge.id)
     }
 
-    private func deleteButton(at point: CGPoint) -> some View {
+    // MARK: Action panel
+
+    private func actionPanel(at point: CGPoint) -> some View {
         HStack(spacing: 2) {
+            // ── Edit Relationship ──────────────────
+            RelationshipButton(edge: edge)
+
+            Divider().frame(height: 14)
+
             // ── Solid / Dashed toggle ──────────────
-            edgeStyleButton(
-                icon: edge.style.isUserCreated ? "line.diagonal" : "line.diagonal",
+            actionButton(
+                icon: "line.diagonal",
                 label: edge.style.isUserCreated ? "실선" : "점선",
                 active: false
             ) {
@@ -325,7 +362,7 @@ private struct EdgeInteractionOverlay: View {
             Divider().frame(height: 14)
 
             // ── Animation toggle ──────────────────
-            edgeStyleButton(
+            actionButton(
                 icon: edge.style.animated ? "pause.fill" : "play.fill",
                 label: edge.style.animated ? "정지" : "흐름",
                 active: edge.style.animated
@@ -336,7 +373,7 @@ private struct EdgeInteractionOverlay: View {
             Divider().frame(height: 14)
 
             // ── Delete ────────────────────────────
-            edgeStyleButton(icon: "xmark", label: "삭제", active: false, destructive: true) {
+            actionButton(icon: "xmark", label: "삭제", active: false, destructive: true) {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
                     vm.deleteEdge(id: edge.id)
                 }
@@ -354,15 +391,18 @@ private struct EdgeInteractionOverlay: View {
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
         )
         .position(point)
-        .onHover { h in
-            isHovered = h
-            vm.hoveredEdgeID = h ? edge.id : nil
+        // Bug fix #1: keep panel visible while mouse is over it,
+        // even if it strays far from the edge path.
+        .onHover { isHovering in
+            if isHovering {
+                vm.hoveredEdgeID = edge.id
+            }
         }
     }
 
-    private func edgeStyleButton(icon: String, label: String, active: Bool,
-                                 destructive: Bool = false,
-                                 action: @escaping () -> Void) -> some View {
+    private func actionButton(icon: String, label: String, active: Bool,
+                               destructive: Bool = false,
+                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 3) {
                 Image(systemName: icon)
@@ -379,16 +419,12 @@ private struct EdgeInteractionOverlay: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(active ? Color.cyan.opacity(0.12)
-                              : destructive ? Color(hex: "f43f5e").opacity(0.08)
-                              : Color.clear)
+                    .fill(active       ? Color.cyan.opacity(0.12)
+                          : destructive ? Color(hex: "f43f5e").opacity(0.08)
+                          : Color.clear)
             )
         }
         .buttonStyle(.plain)
-        .onHover { h in
-            isHovered = h
-            vm.hoveredEdgeID = h ? edge.id : nil
-        }
     }
 
     // MARK: Geometry helpers
@@ -428,8 +464,7 @@ private struct EdgeInteractionOverlay: View {
         if abs(dx) < 1 && abs(dy) < 1 { return center }
         let tx = (dx == 0) ? CGFloat.infinity : halfW / abs(dx)
         let ty = (dy == 0) ? CGFloat.infinity : halfH / abs(dy)
-        let t  = min(tx, ty)
-        return CGPoint(x: center.x + dx * t, y: center.y + dy * t)
+        return CGPoint(x: center.x + dx * min(tx, ty), y: center.y + dy * min(tx, ty))
     }
 
     private func bezierPath(from start: CGPoint, to end: CGPoint) -> Path {
@@ -437,11 +472,8 @@ private struct EdgeInteractionOverlay: View {
         let dy = end.y - start.y
         let dist = max(sqrt(dx*dx + dy*dy), 40)
         let ctrl = min(dist * 0.45, 180.0)
-        let absDX = abs(dx)
-        let absDY = abs(dy)
-        let c1: CGPoint
-        let c2: CGPoint
-        if absDY > absDX {
+        let c1: CGPoint, c2: CGPoint
+        if abs(dy) > abs(dx) {
             c1 = CGPoint(x: start.x, y: start.y + ctrl * (dy > 0 ? 1 : -1))
             c2 = CGPoint(x: end.x,   y: end.y   - ctrl * (dy > 0 ? 1 : -1))
         } else {
@@ -453,28 +485,123 @@ private struct EdgeInteractionOverlay: View {
             p.addCurve(to: end, control1: c1, control2: c2)
         }
     }
+}
 
-    private func bezierMidpoint(from p0: CGPoint, to p3: CGPoint) -> CGPoint {
-        let dx = p3.x - p0.x
-        let dy = p3.y - p0.y
-        let dist = max(sqrt(dx*dx + dy*dy), 40)
-        let ctrl = min(dist * 0.45, 180.0)
-        let absDX = abs(dx)
-        let absDY = abs(dy)
-        let p1: CGPoint
-        let p2: CGPoint
-        if absDY > absDX {
-            p1 = CGPoint(x: p0.x, y: p0.y + ctrl * (dy > 0 ? 1 : -1))
-            p2 = CGPoint(x: p3.x, y: p3.y - ctrl * (dy > 0 ? 1 : -1))
-        } else {
-            p1 = CGPoint(x: p0.x + ctrl * (dx > 0 ? 1 : -1), y: p0.y)
-            p2 = CGPoint(x: p3.x - ctrl * (dx > 0 ? 1 : -1), y: p3.y)
+// MARK: - RelationshipButton
+
+/// A button in the edge action panel that opens the relationship-label editor.
+private struct RelationshipButton: View {
+    @Environment(GraphViewModel.self) private var vm
+    let edge: GraphEdge
+
+    var body: some View {
+        Button {
+            vm.editingRelationshipEdgeID = edge.id
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "pencil.line")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(edge.relationship.isEmpty ? "관계 설정" : "수정")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(Color.white.opacity(0.6))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.clear))
         }
-        let t: CGFloat = 0.5
-        let mt = 1 - t
-        return CGPoint(
-            x: mt*mt*mt*p0.x + 3*mt*mt*t*p1.x + 3*mt*t*t*p2.x + t*t*t*p3.x,
-            y: mt*mt*mt*p0.y + 3*mt*mt*t*p1.y + 3*mt*t*t*p2.y + t*t*t*p3.y
-        )
+        .buttonStyle(.plain)
     }
+}
+
+// MARK: - RelationshipPopup
+
+/// Centered modal popup for editing an edge's relationship label.
+/// Rendered above all other layers so it's never obscured.
+struct RelationshipPopup: View {
+    @Environment(GraphViewModel.self) private var vm
+    let edgeID: String
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack {
+            // Dimmed backdrop — tap to cancel
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+                .onTapGesture { dismiss() }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("관계 레이블")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+
+                TextField("예: 원인, 결과, 관련됨…", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .focused($focused)
+                    .onSubmit { save() }
+
+                HStack {
+                    Button("취소") { dismiss() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("저장") { save() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(red: 0.09, green: 0.11, blue: 0.15))
+                    .shadow(color: .black.opacity(0.6), radius: 24, y: 8)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+        }
+        .onAppear {
+            if let edge = vm.edges.first(where: { $0.id == edgeID }) {
+                text = edge.relationship
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                focused = true
+            }
+        }
+    }
+
+    private func save() {
+        vm.updateEdgeRelationship(id: edgeID, newRelationship: text.trimmingCharacters(in: .whitespaces))
+        dismiss()
+    }
+
+    private func dismiss() {
+        vm.editingRelationshipEdgeID = nil
+        vm.hoveredEdgeID = nil
+    }
+}
+
+// MARK: - Shared bezier midpoint helper
+
+private func bezierMidpoint(from p0: CGPoint, to p3: CGPoint) -> CGPoint {
+    let dx = p3.x - p0.x
+    let dy = p3.y - p0.y
+    let dist = max(sqrt(dx*dx + dy*dy), 40)
+    let ctrl = min(dist * 0.45, 180.0)
+    let p1: CGPoint, p2: CGPoint
+    if abs(dy) > abs(dx) {
+        p1 = CGPoint(x: p0.x, y: p0.y + ctrl * (dy > 0 ? 1 : -1))
+        p2 = CGPoint(x: p3.x, y: p3.y - ctrl * (dy > 0 ? 1 : -1))
+    } else {
+        p1 = CGPoint(x: p0.x + ctrl * (dx > 0 ? 1 : -1), y: p0.y)
+        p2 = CGPoint(x: p3.x - ctrl * (dx > 0 ? 1 : -1), y: p3.y)
+    }
+    let t: CGFloat = 0.5, mt = 1 - t
+    return CGPoint(
+        x: mt*mt*mt*p0.x + 3*mt*mt*t*p1.x + 3*mt*t*t*p2.x + t*t*t*p3.x,
+        y: mt*mt*mt*p0.y + 3*mt*mt*t*p1.y + 3*mt*t*t*p2.y + t*t*t*p3.y
+    )
 }

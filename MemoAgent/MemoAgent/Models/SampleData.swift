@@ -124,43 +124,51 @@ let sampleNodes: [GraphNode] = [
 
 // MARK: - Sample Edges
 
-/// A 1-to-1 port of `initialEdges` from sampleNodes.ts.
-/// The `strokeDasharray: '5,5'` edges are mapped to `isUserCreated: true`.
+/// A 1-to-1 port of `initialEdges` from sampleNodes.ts with semantic relationships added.
 let sampleEdges: [GraphEdge] = [
     GraphEdge(
         id: "e1-2", sourceID: "1", targetID: "2",
+        relationship: "방법론 참조",
         style: EdgeStyle(strokeWidth: 2, animated: true, isUserCreated: false)
     ),
     GraphEdge(
         id: "e1-4", sourceID: "1", targetID: "4",
+        relationship: "설계 원칙 적용",
         style: EdgeStyle(strokeWidth: 3, animated: false, isUserCreated: false)
     ),
     GraphEdge(
         id: "e2-5", sourceID: "2", targetID: "5",
+        relationship: "실전 구현",
         style: EdgeStyle(strokeWidth: 1, animated: false, isUserCreated: false)
     ),
     GraphEdge(
         id: "e1-3", sourceID: "1", targetID: "3",
+        relationship: "자동화 도구",
         style: EdgeStyle(strokeWidth: 2, animated: true, isUserCreated: true)
     ),
     GraphEdge(
         id: "e3-6", sourceID: "3", targetID: "6",
+        relationship: "제약 사항 발견",
         style: EdgeStyle(strokeWidth: 2, animated: false, isUserCreated: false)
     ),
     GraphEdge(
         id: "e6-7", sourceID: "6", targetID: "7",
+        relationship: "해결책 제안",
         style: EdgeStyle(strokeWidth: 3, animated: true, isUserCreated: false)
     ),
     GraphEdge(
         id: "e7-9", sourceID: "7", targetID: "9",
+        relationship: "기술 스택 비교",
         style: EdgeStyle(strokeWidth: 2, animated: false, isUserCreated: false)
     ),
     GraphEdge(
         id: "e4-8", sourceID: "4", targetID: "8",
+        relationship: "구현 팁",
         style: EdgeStyle(strokeWidth: 1, animated: true, isUserCreated: true)
     ),
     GraphEdge(
         id: "e1-10", sourceID: "1", targetID: "10",
+        relationship: "시각화 도구 선정",
         style: EdgeStyle(strokeWidth: 2, animated: false, isUserCreated: false)
     ),
 ]

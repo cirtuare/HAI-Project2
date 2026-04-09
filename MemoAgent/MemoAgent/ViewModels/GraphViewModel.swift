@@ -149,6 +149,9 @@ final class GraphViewModel {
     /// ID of the edge currently hovered by the pointer.
     var hoveredEdgeID: String? = nil
 
+    /// ID of the edge whose relationship label is currently being edited.
+    var editingRelationshipEdgeID: String? = nil
+
     // ─────────────────────────────────────────────
     // MARK: Edge Connection State
     // ─────────────────────────────────────────────
@@ -407,6 +410,7 @@ final class GraphViewModel {
                     id: "e\(src)-\(tgt)-user",
                     sourceID: src,
                     targetID: tgt,
+                    relationship: "",
                     style: EdgeStyle(strokeWidth: 2, animated: true, isUserCreated: true)
                 )
                 edges.append(edge)
@@ -458,6 +462,12 @@ final class GraphViewModel {
         persistGraph()
     }
 
+    func updateEdgeRelationship(id: String, newRelationship: String) {
+        guard let idx = edges.firstIndex(where: { $0.id == id }) else { return }
+        edges[idx].relationship = newRelationship
+        persistGraph()
+    }
+
     // ─────────────────────────────────────────────
     // MARK: - Edge Connection Drag
     // ─────────────────────────────────────────────
@@ -505,6 +515,7 @@ final class GraphViewModel {
             id: "e\(srcID)-\(tgtID)",
             sourceID: srcID,
             targetID: tgtID,
+            relationship: "",
             style: EdgeStyle(strokeWidth: 1.5, animated: false, isUserCreated: true)
         )
         edges.append(edge)
