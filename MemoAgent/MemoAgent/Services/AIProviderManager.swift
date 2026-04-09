@@ -138,6 +138,16 @@ final class AIProviderManager {
     private let defaultsKey     = "memoagent.ai.provider.v1"
     private let keychainService = "com.memoagent.app"
 
+    // MARK: V2 — Persona context
+
+    /// When set, this string is prepended to every system prompt.
+    var activePersonaContext: String? = nil
+
+    private func augmentedSystem(_ system: String) -> String {
+        guard let ctx = activePersonaContext, !ctx.isEmpty else { return system }
+        return "\(ctx)\n\n\(system)"
+    }
+
     // MARK: Provider selection
 
     var selectedProvider: AIProvider {
@@ -184,15 +194,33 @@ final class AIProviderManager {
     // MARK: Unified API — non-streaming
 
     func callAI(system: String, userMessage: String, maxTokens: Int = 1500) async throws -> String {
+        let sys = augmentedSystem(system)
         switch selectedProvider {
         case .appleIntelligence:
             fatalError("callAI must not be called for Apple Intelligence")
         case .claudeAPI:
-            return try await callClaude(system: system, userMessage: userMessage, maxTokens: maxTokens)
+            return try await callClaude(system: sys, userMessage: userMessage, maxTokens: maxTokens)
         case .googleAI:
-            return try await callGemini(system: system, userMessage: userMessage, maxTokens: maxTokens)
+            return try await callGemini(system: sys, userMessage: userMessage, maxTokens: maxTokens)
         case .openAI:
-            return try await callOpenAI(system: system, userMessage: userMessage, maxTokens: maxTokens)
+            return try await callOpenAI(system: sys, userMessage: userMessage, maxTokens: maxTokens)
+        }
+    }
+
+    /// Call a specific provider regardless of selectedProvider.
+    /// Used by DebateOrchestrator to route specialist agents to named providers.
+    /// Apple Intelligence is not supported here — use LanguageModelSession directly.
+    func callAI(provider: AIProvider, system: String, userMessage: String, maxTokens: Int = 1500) async throws -> String {
+        let sys = augmentedSystem(system)
+        switch provider {
+        case .appleIntelligence:
+            throw AIProviderError.missingAPIKey(.appleIntelligence)
+        case .claudeAPI:
+            return try await callClaude(system: sys, userMessage: userMessage, maxTokens: maxTokens)
+        case .googleAI:
+            return try await callGemini(system: sys, userMessage: userMessage, maxTokens: maxTokens)
+        case .openAI:
+            return try await callOpenAI(system: sys, userMessage: userMessage, maxTokens: maxTokens)
         }
     }
 

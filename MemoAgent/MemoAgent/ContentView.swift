@@ -57,6 +57,22 @@ struct ContentView: View {
         )) {
             SettingsView()
         }
+        // Debate result panel — slides in from bottom-right when synthesis completes
+        .overlay(alignment: .bottomTrailing) {
+            if vm.activeDebateResult != nil {
+                DebateResultPanel(onDismiss: {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        vm.activeDebateResult = nil
+                    }
+                })
+                .padding(.bottom, 20)
+                .padding(.trailing, 20)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .animation(.spring(response: 0.4, dampingFraction: 0.85),
+                           value: vm.activeDebateResult != nil)
+                .zIndex(30)
+            }
+        }
         // Escape key clears selection (also handled by modal's own .keyboardShortcut)
         .onKeyPress(.escape) {
             if !vm.isAddModalPresented {

@@ -8,6 +8,7 @@ import Foundation
 import Observation
 import CoreGraphics
 import FoundationModels
+import SwiftData
 
 // MARK: - ViewMode
 
@@ -89,48 +90,134 @@ enum ClaudeError: Error, LocalizedError {
 final class GraphViewModel {
 
     // ─────────────────────────────────────────────
-    // MARK: Graph State  (persisted to UserDefaults)
+    // MARK: SwiftData Backing Store
     // ─────────────────────────────────────────────
 
-    private static let nodesKey = "memoagent.nodes.v1"
-    private static let edgesKey = "memoagent.edges.v1"
+    private let modelContext: ModelContext
 
-    /// The authoritative list of all nodes on the canvas.
+    // ─────────────────────────────────────────────
+    // MARK: Graph State
+    // ─────────────────────────────────────────────
+
+    /// The authoritative in-memory list of nodes (view layer).
     var nodes: [GraphNode]
 
-    /// The authoritative list of all edges on the canvas.
+    /// The authoritative in-memory list of edges (view layer).
     var edges: [GraphEdge]
 
-    /// Encode and save nodes + edges to UserDefaults.
+    // ─────────────────────────────────────────────
+    // MARK: V2 — Persona & Sync State
+    // ─────────────────────────────────────────────
+
+    var personas: [PersonaRecord] = []
+    var activePersona: PersonaRecord? = nil
+    var showingPersonaOnboarding: Bool = false
+    var isSyncing: Bool = false
+    var lastSyncDate: Date? = nil
+
+    // ─────────────────────────────────────────────
+    // MARK: V2 — Multi-Agent Debate State
+    // ─────────────────────────────────────────────
+
+    /// Non-nil while a debate is running; shown as a status banner.
+    var debateStatus: String? = nil
+    /// The most recent synthesis result from a completed debate (raw JSON string).
+    var activeDebateResult: String? = nil
+    /// Node IDs currently being analyzed by the debate agents (shown with pulse glow).
+    var debateEvidenceNodeIDs: Set<String> = []
+
+    // MARK: - Persistence (SwiftData)
+
+    /// Full sync: reconcile in-memory structs with SwiftData, then save.
     func persistGraph() {
-        let enc = JSONEncoder()
-        if let nd = try? enc.encode(nodes) {
-            UserDefaults.standard.set(nd, forKey: Self.nodesKey)
+        // ── Nodes ──────────────────────────────────────────────────
+        let existingNodes = (try? modelContext.fetch(FetchDescriptor<NodeRecord>())) ?? []
+        let existingNodeMap = Dictionary(uniqueKeysWithValues: existingNodes.map { ($0.id, $0) })
+        let liveNodeIDs = Set(nodes.map { $0.id })
+
+        for record in existingNodes where !liveNodeIDs.contains(record.id) {
+            modelContext.delete(record)
         }
-        if let ed = try? enc.encode(edges) {
-            UserDefaults.standard.set(ed, forKey: Self.edgesKey)
+        for node in nodes {
+            if let record = existingNodeMap[node.id] {
+                record.update(from: node)
+            } else {
+                modelContext.insert(NodeRecord.from(node))
+            }
+        }
+
+        // ── Edges ──────────────────────────────────────────────────
+        let existingEdges = (try? modelContext.fetch(FetchDescriptor<EdgeRecord>())) ?? []
+        let existingEdgeMap = Dictionary(uniqueKeysWithValues: existingEdges.map { ($0.id, $0) })
+        let liveEdgeIDs = Set(edges.map { $0.id })
+
+        for record in existingEdges where !liveEdgeIDs.contains(record.id) {
+            modelContext.delete(record)
+        }
+        for edge in edges {
+            if let record = existingEdgeMap[edge.id] {
+                record.update(from: edge)
+            } else {
+                modelContext.insert(EdgeRecord.from(edge))
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    /// Kick off cross-domain pattern detection and debate if warranted.
+    /// Must be called on the main actor (uses internal modelContext).
+    @MainActor
+    func runDebatePatternDetection() {
+        let ctx = modelContext
+        Task {
+            await NodeManagerAgent.shared.runPatternDetection(context: ctx, viewModel: self)
         }
     }
 
-    /// Load persisted graph, falling back to sample data if nothing saved yet.
-    private static func loadNodes() -> [GraphNode] {
-        guard let data = UserDefaults.standard.data(forKey: nodesKey),
-              let decoded = try? JSONDecoder().decode([GraphNode].self, from: data),
-              !decoded.isEmpty
-        else { return sampleNodes }
-        return decoded
+    /// Re-fetch nodes/edges from SwiftData and refresh in-memory arrays.
+    /// Called after background sync agents insert new records.
+    @MainActor
+    func refreshFromSwiftData() {
+        let fetched = (try? modelContext.fetch(FetchDescriptor<NodeRecord>())) ?? []
+        nodes = fetched.map { $0.toGraphNode() }
+        let fetchedEdges = (try? modelContext.fetch(FetchDescriptor<EdgeRecord>())) ?? []
+        edges = fetchedEdges.map { $0.toGraphEdge() }
+        personas = (try? modelContext.fetch(FetchDescriptor<PersonaRecord>())) ?? []
+        activePersona = personas.first(where: { $0.isActive })
     }
 
-    private static func loadEdges() -> [GraphEdge] {
-        guard let data = UserDefaults.standard.data(forKey: edgesKey),
-              let decoded = try? JSONDecoder().decode([GraphEdge].self, from: data)
-        else { return sampleEdges }
-        return decoded
-    }
+    // MARK: - Init
 
-    init() {
-        nodes = Self.loadNodes()
-        edges = Self.loadEdges()
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+
+        // One-time migration from UserDefaults V1
+        MigrationService.migrateIfNeeded(context: modelContext)
+
+        // Load from SwiftData
+        let fetched = (try? modelContext.fetch(FetchDescriptor<NodeRecord>())) ?? []
+        if fetched.isEmpty {
+            // First launch — seed with sample data and persist
+            nodes = sampleNodes
+            edges = sampleEdges
+        } else {
+            nodes = fetched.map { $0.toGraphNode() }
+            let fetchedEdges = (try? modelContext.fetch(FetchDescriptor<EdgeRecord>())) ?? []
+            edges = fetchedEdges.map { $0.toGraphEdge() }
+        }
+
+        // Load personas
+        let loadedPersonas = (try? modelContext.fetch(FetchDescriptor<PersonaRecord>())) ?? []
+        personas = loadedPersonas
+        activePersona = loadedPersonas.first(where: { $0.isActive })
+        showingPersonaOnboarding = loadedPersonas.isEmpty
+
+        // Persist sample data if just seeded
+        if fetched.isEmpty {
+            // Persist on next runloop tick to avoid init-time re-entrancy
+            DispatchQueue.main.async { [weak self] in self?.persistGraph() }
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -194,7 +281,7 @@ final class GraphViewModel {
     var isSidebarVisible: Bool = true
     var activeViewMode: ViewMode = .context
 
-    /// Per-type visibility filter.  Nodes whose type is `false` are hidden.
+    /// Per-type visibility filter. Nodes whose type is `false` are hidden.
     var typeFilters: [NodeType: Bool] = Dictionary(
         uniqueKeysWithValues: NodeType.allCases.map { ($0, true) }
     )
@@ -205,11 +292,20 @@ final class GraphViewModel {
 
     var searchQuery: String = ""
 
-    /// Nodes that survive both the type-filter and the search query.
+    /// Nodes that survive persona filter, type-filter, and search query.
     /// Views use this instead of `nodes` directly.
     var visibleNodes: [GraphNode] {
         nodes.filter { node in
+            // Persona filter: show node if (1) no active persona, (2) node has no persona
+            // (global), or (3) node belongs to the active persona.
+            if let persona = activePersona {
+                let isGlobal = node.personaID == nil
+                let belongsHere = node.personaID == persona.id
+                guard isGlobal || belongsHere else { return false }
+            }
+            // Type filter
             guard typeFilters[node.type] == true else { return false }
+            // Search filter
             if searchQuery.isEmpty { return true }
             let q = searchQuery.lowercased()
             return node.title.lowercased().contains(q)
@@ -1037,6 +1133,65 @@ final class GraphViewModel {
 
     func toggleTypeFilter(_ type: NodeType) {
         typeFilters[type] = !(typeFilters[type] ?? true)
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: - V2 Persona Management
+    // ─────────────────────────────────────────────
+
+    /// Select a persona and deactivate all others.
+    func activatePersona(_ persona: PersonaRecord) {
+        for p in personas { p.isActive = false }
+        persona.isActive = true
+        activePersona = persona
+        try? modelContext.save()
+        AIProviderManager.shared.activePersonaContext = persona.systemPromptContext
+    }
+
+    /// Deactivate all personas (show all nodes).
+    func clearPersona() {
+        for p in personas { p.isActive = false }
+        activePersona = nil
+        try? modelContext.save()
+        AIProviderManager.shared.activePersonaContext = nil
+    }
+
+    /// Save selected personas from onboarding and activate the first one.
+    func finishOnboarding(selected types: [PersonaType]) {
+        guard !types.isEmpty else { return }
+        for (i, type) in types.enumerated() {
+            let record = PersonaRecord.make(from: type, isActive: i == 0)
+            modelContext.insert(record)
+        }
+        try? modelContext.save()
+        personas = (try? modelContext.fetch(FetchDescriptor<PersonaRecord>())) ?? []
+        activePersona = personas.first(where: { $0.isActive })
+        if let active = activePersona {
+            AIProviderManager.shared.activePersonaContext = active.systemPromptContext
+        }
+        showingPersonaOnboarding = false
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: - V2 Ecosystem Node Insertion
+    // ─────────────────────────────────────────────
+
+    /// Insert nodes from ecosystem sync directly into SwiftData and in-memory array.
+    /// Called by EcosystemSyncService after importing Apple framework data.
+    @MainActor
+    func insertEcosystemNodes(_ newNodes: [GraphNode]) {
+        guard !newNodes.isEmpty else { return }
+        let existingExternalIDs = Set(nodes.compactMap { $0.externalID })
+        let deduplicated = newNodes.filter { node in
+            guard let extID = node.externalID else { return true }
+            return !existingExternalIDs.contains(extID)
+        }
+        for node in deduplicated {
+            nodes.append(node)
+            modelContext.insert(NodeRecord.from(node))
+        }
+        try? modelContext.save()
+        lastSyncDate = Date()
     }
 }
 

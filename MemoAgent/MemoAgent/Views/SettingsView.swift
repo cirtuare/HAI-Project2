@@ -8,6 +8,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(GraphViewModel.self) private var vm
+
+    enum SettingsTab { case ai, ecosystem }
+    @State private var activeTab: SettingsTab = .ai
 
     @State private var selectedProvider: AIProvider = AIProviderManager.shared.selectedProvider
     // Per-provider key inputs
@@ -31,12 +35,25 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            // Tab selector
+            HStack(spacing: 0) {
+                tabButton("AI 설정", tab: .ai, icon: "cpu")
+                tabButton("Apple 연동", tab: .ecosystem, icon: "apps.iphone")
+            }
+            .padding(4)
+            .background(Color.white.opacity(0.04))
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    providerSection
-                    if selectedProvider.requiresAPIKey {
-                        Divider()
-                        apiKeySection(for: selectedProvider)
+                    if activeTab == .ai {
+                        providerSection
+                        if selectedProvider.requiresAPIKey {
+                            Divider()
+                            apiKeySection(for: selectedProvider)
+                        }
+                    } else {
+                        EcosystemPermissionsView()
+                            .environment(vm)
                     }
                 }
                 .padding(24)
@@ -46,6 +63,25 @@ struct SettingsView: View {
         .background(Color(hex: "#0f172a"))
         .colorScheme(.dark)
         .onAppear { loadStoredKeys() }
+    }
+
+    private func tabButton(_ label: String, tab: SettingsTab, icon: String) -> some View {
+        let isActive = activeTab == tab
+        return Button { activeTab = tab } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(label).font(.system(size: 12, weight: isActive ? .semibold : .regular))
+            }
+            .foregroundStyle(isActive ? Color.white.opacity(0.9) : Color.white.opacity(0.4))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isActive ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isActive)
     }
 
     // MARK: Header

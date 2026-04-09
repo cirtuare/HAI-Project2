@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>NodeMind는 선택한 페르소나(건강, 업무 등)에 맞게 건강 데이터를 읽어 지식 노드로 변환합니다. 데이터는 기기 밖으로 전송되지 않습니다.</string>
+
+	<key>NSCalendarsUsageDescription</key>
+	<string>NodeMind는 캘린더 이벤트를 읽어 관련 지식 노드와 연결합니다.</string>
+
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>NodeMind는 캘린더 이벤트를 읽어 관련 지식 노드와 연결합니다.</string>
+
+	<key>NSRemindersUsageDescription</key>
+	<string>NodeMind는 미리 알림 항목을 노드로 변환하여 지식 그래프에 통합합니다.</string>
+
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>NodeMind는 미리 알림 항목을 노드로 변환하여 지식 그래프에 통합합니다.</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NodeMind는 사진의 날짜·위치 메타데이터만 읽습니다. 실제 이미지는 저장되거나 전송되지 않습니다.</string>
+</dict>
+</plist>

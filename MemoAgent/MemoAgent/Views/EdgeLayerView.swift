@@ -292,6 +292,13 @@ struct EdgeLayerView: View {
     private func edgeColor(edge: GraphEdge, hovered: Bool) -> Color {
         if hovered                  { return Color(hex: "64748b") }
         if edge.style.isUserCreated { return Color(hex: "38bdf8") }
+        // Debate-generated edges get semantic colors
+        switch edge.relationship {
+        case "근거":      return Color(hex: "f59e0b").opacity(0.55)  // amber — evidence link
+        case "실행 항목": return Color(hex: "f97316").opacity(0.85)  // orange — action link
+        case "원인":      return Color(hex: "f43f5e").opacity(0.65)  // rose — causal link
+        default: break
+        }
         switch Int(edge.style.strokeWidth) {
         case 3:  return Color(hex: "64748b")
         case 1:  return Color(hex: "334155")

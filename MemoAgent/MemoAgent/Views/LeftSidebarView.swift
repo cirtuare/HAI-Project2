@@ -13,13 +13,83 @@ struct LeftSidebarView: View {
         @Bindable var vm = vm
 
         List {
+            if !vm.personas.isEmpty {
+                personaSection
+            }
             viewModeSection
             filterSection
         }
         .listStyle(.sidebar)
         .frame(minWidth: 200, idealWidth: 220, maxWidth: 260)
-        // Sidebar background: thin material tinted to match dark surface-primary
         .background(.regularMaterial)
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Persona Section (V2)
+    // ─────────────────────────────────────────────
+
+    private var personaSection: some View {
+        Section {
+            // "All" row — clears active persona
+            personaRow(
+                id: nil,
+                name: "전체 보기",
+                colorHex: "#64748b",
+                icon: "globe",
+                isActive: vm.activePersona == nil
+            )
+            ForEach(vm.personas, id: \.id) { persona in
+                personaRow(
+                    id: persona.id,
+                    name: persona.name,
+                    colorHex: persona.accentColorHex,
+                    icon: persona.personaType?.icon ?? "person.fill",
+                    isActive: vm.activePersona?.id == persona.id
+                )
+            }
+        } header: {
+            Text("PERSONA")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .kerning(0.8)
+        }
+    }
+
+    private func personaRow(id: String?, name: String, colorHex: String, icon: String, isActive: Bool) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                if let id, let persona = vm.personas.first(where: { $0.id == id }) {
+                    vm.activatePersona(persona)
+                } else {
+                    vm.clearPersona()
+                }
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isActive ? Color(hex: colorHex) : Color.secondary)
+                    .frame(width: 16)
+                Text(name)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                Spacer()
+                if isActive {
+                    Circle()
+                        .fill(Color(hex: colorHex))
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isActive ? Color(hex: colorHex).opacity(0.1) : Color.clear)
+        )
+        .animation(.easeInOut(duration: 0.15), value: isActive)
     }
 
     // ─────────────────────────────────────────────

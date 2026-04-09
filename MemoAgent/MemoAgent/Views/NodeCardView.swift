@@ -18,30 +18,27 @@ struct NodeTypeStyle {
 
     static func style(for type: NodeType) -> NodeTypeStyle {
         switch type {
+        // ── V1 types ──────────────────────────────
         case .memo:
-            return NodeTypeStyle(
-                accentColor: Color(hex: "#06b6d4"),   // cyan-500
-                bgColor:     Color(hex: "#06b6d4").opacity(0.10),
-                systemImage: "doc.text"
-            )
+            return NodeTypeStyle(accentColor: Color(hex: "#06b6d4"), bgColor: Color(hex: "#06b6d4").opacity(0.10), systemImage: "doc.text")
         case .pdf:
-            return NodeTypeStyle(
-                accentColor: Color(hex: "#f43f5e"),   // rose-500
-                bgColor:     Color(hex: "#f43f5e").opacity(0.10),
-                systemImage: "doc.fill"
-            )
+            return NodeTypeStyle(accentColor: Color(hex: "#f43f5e"), bgColor: Color(hex: "#f43f5e").opacity(0.10), systemImage: "doc.fill")
         case .diary:
-            return NodeTypeStyle(
-                accentColor: Color(hex: "#f59e0b"),   // amber-500
-                bgColor:     Color(hex: "#f59e0b").opacity(0.10),
-                systemImage: "book.closed"
-            )
+            return NodeTypeStyle(accentColor: Color(hex: "#f59e0b"), bgColor: Color(hex: "#f59e0b").opacity(0.10), systemImage: "book.closed")
         case .chat:
-            return NodeTypeStyle(
-                accentColor: Color(hex: "#8b5cf6"),   // violet-500
-                bgColor:     Color(hex: "#8b5cf6").opacity(0.10),
-                systemImage: "message"
-            )
+            return NodeTypeStyle(accentColor: Color(hex: "#8b5cf6"), bgColor: Color(hex: "#8b5cf6").opacity(0.10), systemImage: "message")
+        // ── V2 Apple ecosystem types ──────────────
+        case .healthMetric:
+            return NodeTypeStyle(accentColor: Color(hex: "#f43f5e"), bgColor: Color(hex: "#f43f5e").opacity(0.10), systemImage: "heart.fill")
+        case .calendarEvent:
+            return NodeTypeStyle(accentColor: Color(hex: "#3b82f6"), bgColor: Color(hex: "#3b82f6").opacity(0.10), systemImage: "calendar")
+        case .photo:
+            return NodeTypeStyle(accentColor: Color(hex: "#a855f7"), bgColor: Color(hex: "#a855f7").opacity(0.10), systemImage: "photo.fill")
+        case .reminder:
+            return NodeTypeStyle(accentColor: Color(hex: "#22c55e"), bgColor: Color(hex: "#22c55e").opacity(0.10), systemImage: "checklist")
+        // ── V2 AI-generated ───────────────────────
+        case .aiCluster:
+            return NodeTypeStyle(accentColor: Color(hex: "#f97316"), bgColor: Color(hex: "#f97316").opacity(0.10), systemImage: "sparkles")
         }
     }
 }
@@ -54,33 +51,67 @@ struct NodeCardView: View {
     /// True when this card is the hover-target during a connection drag.
     var isConnectionTarget: Bool = false
     let searchOpacity: Double
+    /// True when the debate agent is actively analyzing this node (shows pulse glow).
+    var isDebateEvidence: Bool = false
 
     /// Called when the user selects "삭제" from the context menu.
     var onDelete: () -> Void = {}
 
-    @State private var isHovered = false
-    @State private var isDragging = false
+    @State private var isHovered   = false
+    @State private var pulseScale:  CGFloat = 1.0
+    @State private var pulseOpacity: Double = 0.7
 
     private let style: NodeTypeStyle
     private let cardWidth: CGFloat
+    /// True when this is an AI-generated cluster from a multi-agent debate.
+    private let isDebateCluster: Bool
 
     init(node: GraphNode, isSelected: Bool, isConnectionTarget: Bool = false,
-         searchOpacity: Double,
+         searchOpacity: Double, isDebateEvidence: Bool = false,
          onDelete: @escaping () -> Void = {}) {
         self.node = node
         self.isSelected = isSelected
         self.isConnectionTarget = isConnectionTarget
         self.searchOpacity = searchOpacity
+        self.isDebateEvidence = isDebateEvidence
         self.onDelete = onDelete
         self.style = NodeTypeStyle.style(for: node.type)
         self.cardWidth = node.isImportant ? 240 : 210
+        self.isDebateCluster = node.type == .aiCluster && node.tags.contains("AI 멀티에이전트")
     }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
+            // Evidence pulse ring — rendered behind card
+            if isDebateEvidence {
+                debateEvidenceRing
+            }
+            // Debate cluster radial glow — rendered behind card
+            if isDebateCluster {
+                debateClusterGlow
+            }
             card
-            if node.isImportant {
+            if node.isImportant || isDebateCluster {
                 importanceBadge
+            }
+        }
+        // Evidence pulse animation lifecycle
+        .onAppear {
+            guard isDebateEvidence else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                pulseScale   = 1.12
+                pulseOpacity = 0.0
+            }
+        }
+        .onChange(of: isDebateEvidence) { _, active in
+            if active {
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                    pulseScale = 1.12; pulseOpacity = 0.0
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    pulseScale = 1.0; pulseOpacity = 0.7
+                }
             }
         }
         // Hover tooltip appears below the card
@@ -107,6 +138,10 @@ struct NodeCardView: View {
         .scaleEffect(isHovered && !isSelected ? 1.025 : 1.0)
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered)
         .onHover { isHovered = $0 }
+        .shadow(
+            color: isDebateCluster ? Color(hex: "#f97316").opacity(0.45) : .clear,
+            radius: isDebateCluster ? 20 : 0
+        )
         .contextMenu {
             Button(role: .destructive) {
                 onDelete()
@@ -231,10 +266,33 @@ struct NodeCardView: View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
             .strokeBorder(
                 isConnectionTarget ? Color.cyan
-                    : isSelected    ? style.accentColor
-                    :                 style.accentColor.opacity(0.3),
-                lineWidth: (isSelected || isConnectionTarget) ? 2 : 1
+                    : isDebateCluster  ? style.accentColor
+                    : isSelected       ? style.accentColor
+                    :                    style.accentColor.opacity(0.3),
+                lineWidth: (isSelected || isConnectionTarget || isDebateCluster) ? 2 : 1
             )
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Debate visual elements
+    // ─────────────────────────────────────────────
+
+    /// Expanding pulse ring shown while this node is being analyzed by debate agents.
+    private var debateEvidenceRing: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(style.accentColor.opacity(pulseOpacity), lineWidth: 2)
+            .scaleEffect(pulseScale)
+            .frame(width: cardWidth + 8, height: 130)
+            .allowsHitTesting(false)
+    }
+
+    /// Static radial orange glow for AI cluster debate result nodes.
+    private var debateClusterGlow: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Color(hex: "#f97316").opacity(0.08))
+            .frame(width: cardWidth + 20, height: 140)
+            .blur(radius: 12)
+            .allowsHitTesting(false)
     }
 
     // ─────────────────────────────────────────────
@@ -242,9 +300,9 @@ struct NodeCardView: View {
     // ─────────────────────────────────────────────
 
     private var importanceBadge: some View {
-        Image(systemName: "sparkles")
+        Image(systemName: isDebateCluster ? "brain" : "sparkles")
             .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(Color(hex: "#f59e0b"))
+            .foregroundStyle(isDebateCluster ? Color(hex: "#f97316") : Color(hex: "#f59e0b"))
             .padding(4)
             .background(
                 Circle()

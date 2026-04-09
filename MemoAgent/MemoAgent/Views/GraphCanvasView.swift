@@ -45,6 +45,18 @@ struct GraphCanvasView: View {
                 }
 
                 FloatingActionsView()
+
+                // Debate progress banner — appears at top when agents are analyzing
+                if vm.debateStatus != nil {
+                    DebateStatusBanner()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 14)
+                        .allowsHitTesting(false)
+                        .zIndex(50)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8),
+                                   value: vm.debateStatus != nil)
+                }
             }
             .gesture(canvasPanGesture)
             .gesture(magnifyGesture)
@@ -75,8 +87,9 @@ struct GraphCanvasView: View {
                     y: basePos.y + dragTranslation.height
                   )
                 : basePos
-            let isSelected = vm.selectedNodeIDs.contains(node.id)
-            let isTarget   = vm.connectingTargetNodeID == node.id
+            let isSelected       = vm.selectedNodeIDs.contains(node.id)
+            let isTarget         = vm.connectingTargetNodeID == node.id
+            let isDebateEvidence = vm.debateEvidenceNodeIDs.contains(node.id)
 
             ZStack {
                 NodeCardView(
@@ -84,6 +97,7 @@ struct GraphCanvasView: View {
                     isSelected: isSelected,
                     isConnectionTarget: isTarget,
                     searchOpacity: vm.searchOpacity(for: node),
+                    isDebateEvidence: isDebateEvidence,
                     onDelete: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             vm.deleteNode(id: node.id)
