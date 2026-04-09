@@ -538,7 +538,7 @@ struct RelationshipPopup: View {
 
                 TextField("예: 원인, 결과, 관련됨…", text: $text)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 220)
+                    .frame(width: 160)
                     .focused($focused)
                     .onSubmit { save() }
 
@@ -552,6 +552,7 @@ struct RelationshipPopup: View {
                         .controlSize(.small)
                 }
             }
+            .frame(width: 192)
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
