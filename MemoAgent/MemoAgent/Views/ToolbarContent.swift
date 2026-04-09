@@ -24,9 +24,12 @@ struct NodeMindToolbar: ToolbarContent {
             searchField
         }
 
-        // ── Trailing: Add data button ────────────────────────────────────
+        // ── Trailing: Settings + Add data ────────────────────────────────
         ToolbarItem(placement: .primaryAction) {
-            addDataButton
+            HStack(spacing: 8) {
+                settingsButton
+                addDataButton
+            }
         }
     }
 
@@ -88,6 +91,32 @@ struct NodeMindToolbar: ToolbarContent {
                 )
         )
         .animation(.easeInOut(duration: 0.15), value: vm.searchQuery.isEmpty)
+    }
+
+    private var settingsButton: some View {
+        Button {
+            vm.isSettingsPresented = true
+        } label: {
+            Image(systemName: "cpu")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(
+                    AIProviderManager.shared.selectedProvider == .claudeAPI
+                        ? Color.cyan
+                        : Color.secondary
+                )
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(
+                            AIProviderManager.shared.selectedProvider == .claudeAPI
+                                ? Color.cyan.opacity(0.12)
+                                : Color.primary.opacity(0.07)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .help("AI 설정")
+        .keyboardShortcut(",", modifiers: [.command])
     }
 
     private var addDataButton: some View {

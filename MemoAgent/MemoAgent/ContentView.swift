@@ -50,6 +50,13 @@ struct ContentView: View {
             SmartInputModalView()
                 .environment(vm)
         }
+        // AI Settings sheet
+        .sheet(isPresented: Binding(
+            get: { vm.isSettingsPresented },
+            set: { vm.isSettingsPresented = $0 }
+        )) {
+            SettingsView()
+        }
         // Escape key clears selection (also handled by modal's own .keyboardShortcut)
         .onKeyPress(.escape) {
             if !vm.isAddModalPresented {

@@ -70,6 +70,19 @@ struct ExtractedKnowledgeGraph {
     var nodes: [ExtractedNodeData]
 }
 
+// MARK: - Errors
+
+enum ClaudeError: Error, LocalizedError {
+    case parseError
+    
+    var errorDescription: String? {
+        switch self {
+        case .parseError:
+            return "AI 응답 데이터를 JSON으로 파싱하는 데 실패했습니다."
+        }
+    }
+}
+
 // MARK: - GraphViewModel
 
 @Observable
@@ -164,6 +177,12 @@ final class GraphViewModel {
     // Gesture accumulators (not observed by views directly)
     private var baseScale: CGFloat = 1.0
     private var basePanOffset: CGSize = .zero
+
+    // ─────────────────────────────────────────────
+    // MARK: Settings State
+    // ─────────────────────────────────────────────
+
+    var isSettingsPresented: Bool = false
 
     // ─────────────────────────────────────────────
     // MARK: Sidebar & Navigation State
@@ -503,7 +522,8 @@ final class GraphViewModel {
     // MARK: - Add Node (SmartInputModal)
     // ─────────────────────────────────────────────
 
-    /// Kick off the real AI processing pipeline using FoundationModels guided generation.
+    /// Kick off the real AI processing pipeline.
+    /// Routes to Claude API or Apple Intelligence based on the user's provider setting.
     @MainActor
     func startModalAnalysis() {
         guard modalProcessStep == .idle else { return }
@@ -514,9 +534,63 @@ final class GraphViewModel {
         modalAnalysedNodes = []
         modalProcessStep = .extracting
 
+        if AIProviderManager.shared.selectedProvider != .appleIntelligence {
+            startModalAnalysisWithAPI(text: text)
+        } else {
+            startModalAnalysisWithAppleIntelligence(text: text)
+        }
+    }
+
+    // ── External API path (Claude / Google AI / OpenAI) ──────────────
+
+    private func startModalAnalysisWithAPI(text: String) {
+        let fallbackTitle = modalTitleInput
+        Task {
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+                await MainActor.run { modalProcessStep = .chunking }
+
+                let system = """
+                    You are a personal knowledge management assistant. \
+                    Extract the core knowledge units from the provided text \
+                    and return ONLY valid JSON — no markdown, no explanation. \
+                    Respond in the same language as the input text.
+                    """
+                let userMsg = """
+                    Text to analyse:
+                    ---
+                    \(text.prefix(2000))
+                    ---
+                    Extract at most 3 distinct knowledge nodes. Return ONLY this JSON structure:
+                    {"nodes":[{"title":"concise title 5-15 words","summary":"1-2 sentence summary","tags":"tag1, tag2","isImportant":false}]}
+                    """
+
+                let json = try await AIProviderManager.shared.callAI(
+                    system: system,
+                    userMessage: userMsg,
+                    maxTokens: 1500
+                )
+                let nodes = try Self.parseClaudeNodes(from: json)
+                await MainActor.run {
+                    modalAnalysedNodes = Array(nodes.prefix(3))
+                    modalProcessStep = .done
+                }
+            } catch {
+                await MainActor.run {
+                    modalAIError = error.localizedDescription
+                    modalAnalysedNodes = [Self.makeFallbackNode(title: fallbackTitle, text: text)]
+                    modalProcessStep = .done
+                }
+            }
+        }
+    }
+
+    // ── Apple Intelligence path ───────────────────────────────────────
+
+    private func startModalAnalysisWithAppleIntelligence(text: String) {
+        let fallbackTitle = modalTitleInput
         let model = SystemLanguageModel.default
         guard case .available = model.availability else {
-            // Unavailability → show error, fall back to manual node from input
             let reason: String
             switch model.availability {
             case .unavailable(.deviceNotEligible):
@@ -529,14 +603,7 @@ final class GraphViewModel {
                 reason = "AI 기능을 사용할 수 없습니다."
             }
             modalAIError = reason
-            // Build a simple fallback node so the user can still commit
-            let fallback = ExtractedNodeData(
-                title: modalTitleInput.isEmpty ? "새 노드" : modalTitleInput,
-                summary: String(text.prefix(120)),
-                tags: "",
-                isImportant: false
-            )
-            modalAnalysedNodes = [fallback]
+            modalAnalysedNodes = [Self.makeFallbackNode(title: fallbackTitle, text: text)]
             modalProcessStep = .done
             return
         }
@@ -550,9 +617,6 @@ final class GraphViewModel {
                     Respond in the same language as the input text.
                     """
                 let session = LanguageModelSession(instructions: instructions)
-
-                // Step 1: extracting
-                // (already set above)
                 let userText = text.prefix(2000).description
                 let prompt = """
                     Text to analyse:
@@ -562,7 +626,6 @@ final class GraphViewModel {
                     Extract all distinct knowledge nodes from the text above.
                     """
 
-                // Transition to chunking while the model works
                 try await Task.sleep(for: .milliseconds(400))
                 await MainActor.run { modalProcessStep = .chunking }
 
@@ -570,7 +633,6 @@ final class GraphViewModel {
                     to: prompt,
                     generating: ExtractedKnowledgeGraph.self
                 )
-
                 await MainActor.run {
                     modalAnalysedNodes = Array(response.content.nodes.prefix(3))
                     modalProcessStep = .done
@@ -578,17 +640,53 @@ final class GraphViewModel {
             } catch {
                 await MainActor.run {
                     modalAIError = error.localizedDescription
-                    // Fallback: build a single node from raw input
-                    let fallback = ExtractedNodeData(
-                        title: modalTitleInput.isEmpty ? "새 노드" : modalTitleInput,
-                        summary: String(text.prefix(120)),
-                        tags: "",
-                        isImportant: false
-                    )
-                    modalAnalysedNodes = [fallback]
+                    modalAnalysedNodes = [Self.makeFallbackNode(title: fallbackTitle, text: text)]
                     modalProcessStep = .done
                 }
             }
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+
+    private static func makeFallbackNode(title: String, text: String) -> ExtractedNodeData {
+        ExtractedNodeData(
+            title: title.isEmpty ? "새 노드" : title,
+            summary: String(text.prefix(120)),
+            tags: "",
+            isImportant: false
+        )
+    }
+
+    /// Parses a JSON response from Claude into an array of `ExtractedNodeData`.
+    /// Handles optional markdown code fences.
+    private static func parseClaudeNodes(from text: String) throws -> [ExtractedNodeData] {
+        struct GraphJSON: Decodable {
+            struct NodeJSON: Decodable {
+                let title: String
+                let summary: String
+                let tags: String
+                let isImportant: Bool
+            }
+            let nodes: [NodeJSON]
+        }
+
+        // Strip markdown code fences if present
+        var clean = text
+        if let s = text.range(of: "```json"), let e = text.range(of: "```", range: s.upperBound..<text.endIndex) {
+            clean = String(text[s.upperBound..<e.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if let s = text.range(of: "```"), let e = text.range(of: "```", range: s.upperBound..<text.endIndex) {
+            clean = String(text[s.upperBound..<e.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Narrow to outermost { … }
+        if let first = clean.firstIndex(of: "{"), let last = clean.lastIndex(of: "}") {
+            clean = String(clean[first...last])
+        }
+
+        guard let data = clean.data(using: .utf8) else { throw ClaudeError.parseError }
+        let graph = try JSONDecoder().decode(GraphJSON.self, from: data)
+        return graph.nodes.map { n in
+            ExtractedNodeData(title: n.title, summary: n.summary, tags: n.tags, isImportant: n.isImportant)
         }
     }
 
@@ -703,13 +801,47 @@ final class GraphViewModel {
         generatedPrompt = "다음 정보를 바탕으로 \(intent)해줘.\n\n[컨텍스트]\n\(context)\n\n[요청사항]\n\(request)"
     }
 
-    /// Generate a PKM prompt for a single node using Apple on-device AI.
-    /// Streams tokens into `aiGeneratedPrompt` as they arrive.
+    /// Generate a PKM prompt for a single node.
+    /// Routes to Claude API or Apple Intelligence based on the user's provider setting.
     @MainActor
     func generateAIPrompt(for node: GraphNode) {
         aiGeneratedPrompt = ""
         aiPromptError = nil
 
+        let instructions = """
+            You are a personal knowledge management assistant. \
+            Given a knowledge node, write a concise, insightful prompt \
+            that helps the user explore, extend, or apply the knowledge. \
+            Respond in the same language as the node content. \
+            Keep it under 150 words.
+            """
+        let userPrompt = """
+            노드 제목: \(node.title)
+            요약: \(node.summary)
+            태그: \(node.tags.joined(separator: ", "))
+            원본: \(node.originalText.prefix(300))
+
+            위 지식 노드를 바탕으로 탐구·발전시킬 수 있는 프롬프트를 작성해줘.
+            """
+
+        if AIProviderManager.shared.selectedProvider != .appleIntelligence {
+            isGeneratingAIPrompt = true
+            Task {
+                defer { isGeneratingAIPrompt = false }
+                do {
+                    for try await partial in AIProviderManager.shared.streamAI(
+                        system: instructions, userMessage: userPrompt, maxTokens: 300
+                    ) {
+                        aiGeneratedPrompt = partial
+                    }
+                } catch {
+                    aiPromptError = error.localizedDescription
+                }
+            }
+            return
+        }
+
+        // Apple Intelligence path
         let model = SystemLanguageModel.default
         switch model.availability {
         case .available:
@@ -717,22 +849,7 @@ final class GraphViewModel {
             Task {
                 defer { isGeneratingAIPrompt = false }
                 do {
-                    let instructions = """
-                        You are a personal knowledge management assistant. \
-                        Given a knowledge node, write a concise, insightful prompt \
-                        that helps the user explore, extend, or apply the knowledge. \
-                        Respond in the same language as the node content. \
-                        Keep it under 150 words.
-                        """
                     let session = LanguageModelSession(instructions: instructions)
-                    let userPrompt = """
-                        노드 제목: \(node.title)
-                        요약: \(node.summary)
-                        태그: \(node.tags.joined(separator: ", "))
-                        원본: \(node.originalText.prefix(300))
-
-                        위 지식 노드를 바탕으로 탐구·발전시킬 수 있는 프롬프트를 작성해줘.
-                        """
                     let stream = session.streamResponse(to: userPrompt)
                     for try await partial in stream {
                         aiGeneratedPrompt = partial.content
@@ -763,11 +880,55 @@ final class GraphViewModel {
     }
 
     /// Generate an analysis prompt that includes the target node AND its connected neighbours.
+    /// Routes to Claude API or Apple Intelligence based on the user's provider setting.
     @MainActor
     func generateConnectedAIPrompt(for node: GraphNode) {
         aiConnectedPrompt = ""
 
         let neighbours = connectedNodes(for: node)
+        let neighbourText = neighbours.isEmpty
+            ? "(연결된 노드 없음)"
+            : neighbours.map { "  - [\($0.type.rawValue)] \($0.title): \($0.summary)" }.joined(separator: "\n")
+
+        let instructions = """
+            You are a personal knowledge management assistant. \
+            Given a central knowledge node and its connected neighbour nodes, \
+            synthesise the relationships and produce an insightful analysis \
+            prompt that explores their connections, contradictions, or synergies. \
+            Respond in the same language as the node content. \
+            Keep it under 250 words.
+            """
+        let userPrompt = """
+            [중심 노드]
+            제목: \(node.title)
+            요약: \(node.summary)
+            태그: \(node.tags.joined(separator: ", "))
+            원본: \(node.originalText.prefix(300))
+
+            [연결된 노드 \(neighbours.count)개]
+            \(neighbourText)
+
+            위 중심 노드와 연결된 노드들의 관계를 분석하고, 이를 함께 탐구·발전시킬 수 있는 프롬프트를 작성해줘.
+            """
+
+        if AIProviderManager.shared.selectedProvider != .appleIntelligence {
+            isGeneratingConnectedPrompt = true
+            Task {
+                defer { isGeneratingConnectedPrompt = false }
+                do {
+                    for try await partial in AIProviderManager.shared.streamAI(
+                        system: instructions, userMessage: userPrompt, maxTokens: 500
+                    ) {
+                        aiConnectedPrompt = partial
+                    }
+                } catch {
+                    aiConnectedPrompt = "오류: \(error.localizedDescription)"
+                }
+            }
+            return
+        }
+
+        // Apple Intelligence path
         let model = SystemLanguageModel.default
         switch model.availability {
         case .available:
@@ -775,35 +936,7 @@ final class GraphViewModel {
             Task {
                 defer { isGeneratingConnectedPrompt = false }
                 do {
-                    let instructions = """
-                        You are a personal knowledge management assistant. \
-                        Given a central knowledge node and its connected neighbour nodes, \
-                        synthesise the relationships and produce an insightful analysis \
-                        prompt that explores their connections, contradictions, or synergies. \
-                        Respond in the same language as the node content. \
-                        Keep it under 250 words.
-                        """
                     let session = LanguageModelSession(instructions: instructions)
-                    var neighbourText = ""
-                    if neighbours.isEmpty {
-                        neighbourText = "(연결된 노드 없음)"
-                    } else {
-                        neighbourText = neighbours.map {
-                            "  - [\($0.type.rawValue)] \($0.title): \($0.summary)"
-                        }.joined(separator: "\n")
-                    }
-                    let userPrompt = """
-                        [중심 노드]
-                        제목: \(node.title)
-                        요약: \(node.summary)
-                        태그: \(node.tags.joined(separator: ", "))
-                        원본: \(node.originalText.prefix(300))
-
-                        [연결된 노드 \(neighbours.count)개]
-                        \(neighbourText)
-
-                        위 중심 노드와 연결된 노드들의 관계를 분석하고, 이를 함께 탐구·발전시킬 수 있는 프롬프트를 작성해줘.
-                        """
                     let stream = session.streamResponse(to: userPrompt)
                     for try await partial in stream {
                         aiConnectedPrompt = partial.content

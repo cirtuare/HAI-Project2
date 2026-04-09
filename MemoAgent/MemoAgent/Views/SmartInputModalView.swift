@@ -427,7 +427,9 @@ struct SmartInputModalView: View {
                         HStack(spacing: 10) {
                             ProgressSpinner()
                                 .foregroundStyle(.cyan)
-                            Text("Apple Intelligence가 노드를 추출하고 있습니다…")
+                            Text(AIProviderManager.shared.selectedProvider == .appleIntelligence
+                                 ? "Apple Intelligence가 노드를 추출하고 있습니다…"
+                                 : "\(AIProviderManager.shared.selectedProvider.rawValue)가 노드를 추출하고 있습니다…")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Color.white.opacity(0.5))
                         }
