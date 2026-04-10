@@ -8,6 +8,7 @@
 //  - SmartInputModalView as a .sheet
 
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -85,6 +86,9 @@ struct ContentView: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     ContentView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
+        .modelContainer(container)
 }

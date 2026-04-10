@@ -7,6 +7,7 @@
 // Mirrors DetailDrawer.tsx in full.
 
 import SwiftUI
+import SwiftData
 
 struct DetailInspectorView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -712,17 +713,11 @@ struct DetailInspectorView: View {
 }
 
 #Preview {
-    struct PreviewWrapper: View {
-        @State var vm: GraphViewModel = {
-            let vm = GraphViewModel()
-            vm.selectNode("1")
-            return vm
-        }()
-        var body: some View {
-            DetailInspectorView()
-                .environment(vm)
-                .frame(width: 360, height: 700)
-        }
-    }
-    return PreviewWrapper()
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let vm = GraphViewModel(modelContext: container.mainContext)
+    vm.selectNode("1")
+    return DetailInspectorView()
+        .environment(vm)
+        .frame(width: 360, height: 700)
 }

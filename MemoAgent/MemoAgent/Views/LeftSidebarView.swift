@@ -5,6 +5,7 @@
 // Reads and writes exclusively through GraphViewModel.
 
 import SwiftUI
+import SwiftData
 
 struct LeftSidebarView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -214,6 +215,8 @@ extension Color {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     LeftSidebarView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
 }

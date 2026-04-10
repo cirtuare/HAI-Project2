@@ -90,9 +90,11 @@ private enum SpecialistRole: String {
     }
 }
 
-// MARK: - SynthesisJSON (Codable — used for both API path decode and Apple Intelligence encode)
+// MARK: - SynthesisJSON
+// Not Codable — uses JSONSerialization to avoid @MainActor inference
+// caused by @Generable macros in this file.
 
-private struct SynthesisJSON: Codable {
+private struct SynthesisJSON: Sendable {
     let rootCause: String
     let actions: [String]
     let urgency: String
@@ -115,7 +117,7 @@ actor DebateOrchestrator {
     func startDebate(trigger: DebateTrigger,
                      context: ModelContext,
                      viewModel: GraphViewModel) async {
-        let hash = trigger.debateHash
+        let hash = await MainActor.run { trigger.debateHash }
         guard !activeHashes.contains(hash),
               !recentDebateExists(hash: hash, context: context) else { return }
         activeHashes.insert(hash)
@@ -275,10 +277,12 @@ actor DebateOrchestrator {
     }
 
     private func encodeToJSON(_ result: DebateSynthesisResult) -> String {
-        let obj = SynthesisJSON(rootCause: result.rootCause,
-                                actions: result.actions,
-                                urgency: result.urgency)
-        guard let data = try? JSONEncoder().encode(obj),
+        let dict: [String: Any] = [
+            "rootCause": result.rootCause,
+            "actions":   result.actions,
+            "urgency":   result.urgency
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let str  = String(data: data, encoding: .utf8) else {
             return "{\"rootCause\": \"\(result.rootCause)\", \"actions\": [], \"urgency\": \"soon\"}"
         }
@@ -382,8 +386,7 @@ actor DebateOrchestrator {
     /// Route to the user's selected provider.
     /// Apple Intelligence specialist calls use @Generable DebateTextResponse.
     private func callBestProvider(system: String, userMessage: String) async throws -> String {
-        let mgr = AIProviderManager.shared
-        let provider = mgr.selectedProvider
+        let provider = await MainActor.run { AIProviderManager.shared.selectedProvider }
 
         if provider == .appleIntelligence {
             let model = SystemLanguageModel.default
@@ -397,10 +400,10 @@ actor DebateOrchestrator {
             )
             return response.content.text
         }
-        return try await mgr.callAI(provider: provider,
-                                     system: system,
-                                     userMessage: userMessage,
-                                     maxTokens: maxTokensPerTurn)
+        return try await AIProviderManager.shared.callAI(provider: provider,
+                                                         system: system,
+                                                         userMessage: userMessage,
+                                                         maxTokens: maxTokensPerTurn)
     }
 
     // MARK: - Transcript compression
@@ -427,8 +430,12 @@ actor DebateOrchestrator {
         guard let start = text.firstIndex(of: "{"),
               let end   = text.lastIndex(of: "}") else { return nil }
         let jsonStr = String(text[start...end])
-        guard let data = jsonStr.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(SynthesisJSON.self, from: data)
+        guard let data = jsonStr.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rootCause = dict["rootCause"] as? String,
+              let actions   = dict["actions"]   as? [String],
+              let urgency   = dict["urgency"]   as? String else { return nil }
+        return SynthesisJSON(rootCause: rootCause, actions: actions, urgency: urgency)
     }
 
     private func defaultActions(from text: String) -> [String] {

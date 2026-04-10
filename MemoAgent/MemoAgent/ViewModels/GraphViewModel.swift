@@ -1193,6 +1193,7 @@ final class GraphViewModel {
         try? modelContext.save()
         lastSyncDate = Date()
     }
+
 }
 
 // MARK: - Comparable clamping helper

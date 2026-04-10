@@ -9,6 +9,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import PDFKit
+import SwiftData
 
 struct SmartInputModalView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -654,6 +655,8 @@ private struct ProgressSpinner: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     SmartInputModalView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
 }

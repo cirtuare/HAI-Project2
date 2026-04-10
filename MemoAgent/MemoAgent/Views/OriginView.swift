@@ -6,6 +6,7 @@
 // Selecting a node opens the detail inspector.
 
 import SwiftUI
+import SwiftData
 
 struct OriginView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -273,7 +274,9 @@ private struct OriginNodeRow: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     OriginView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
         .frame(width: 800, height: 600)
 }

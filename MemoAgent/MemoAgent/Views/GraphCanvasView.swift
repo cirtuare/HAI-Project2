@@ -2,6 +2,7 @@
 // MemoAgent — Phase 4: Full Interactive Graph Canvas
 
 import SwiftUI
+import SwiftData
 
 struct GraphCanvasView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -293,7 +294,9 @@ struct DotGridView: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     GraphCanvasView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
         .frame(width: 1100, height: 700)
 }

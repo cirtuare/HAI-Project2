@@ -61,6 +61,7 @@ final class HealthKitSyncProvider {
         let storedData = UserDefaults.standard.data(forKey: anchorKey)
         let anchor: HKQueryAnchor? = storedData.flatMap { try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: $0) }
 
+        let personaID = persona.id   // capture String, not PersonaRecord, for @Sendable closure
         return await withCheckedContinuation { continuation in
             let query = HKAnchoredObjectQuery(
                 type: sampleType,
@@ -77,7 +78,7 @@ final class HealthKitSyncProvider {
                    let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
                     UserDefaults.standard.set(data, forKey: anchorKey)
                 }
-                let nodes = self?.convert(samples: samples, personaID: persona.id) ?? []
+                let nodes = self?.convert(samples: samples, personaID: personaID) ?? []
                 continuation.resume(returning: nodes)
             }
             store.execute(query)

@@ -91,7 +91,7 @@ final class EventKitSyncProvider {
         )
 
         return await withCheckedContinuation { continuation in
-            store.fetchReminders(matching: predicate) { reminders in
+            store.fetchReminders(matching: predicate) { [self] reminders in
                 let formatter = ISO8601DateFormatter()
                 let nodes: [GraphNode] = (reminders ?? []).compactMap { reminder in
                     let dateStr = reminder.dueDateComponents.map { comps -> String in
@@ -109,7 +109,7 @@ final class EventKitSyncProvider {
                         originalText: "Reminder: \(reminder.title ?? "") | due: \(dateStr) | \(reminder.notes ?? "")",
                         isImportant: reminder.priority > 5,
                         tags: ["미리 알림", reminder.calendar.title].filter { !$0.isEmpty },
-                        position: randomCanvasPosition(),
+                        position: self.randomCanvasPosition(),
                         sourceSystem: .reminders,
                         externalID: reminder.calendarItemIdentifier,
                         personaID: persona.id

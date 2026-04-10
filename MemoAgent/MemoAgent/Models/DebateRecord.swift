@@ -32,10 +32,11 @@ struct DebateTrigger {
     let secondaryDomainSummary: String
     let personaID: String?
 
-    /// Stable key used for 24-hour deduplication
+    /// Stable key used for 24-hour deduplication.
+    /// Uses pure arithmetic (day bucket since epoch) to stay nonisolated.
     var debateHash: String {
-        let day = ISO8601DateFormatter().string(from: Date()).prefix(10)
-        return "\(primaryDomain.rawValue)-\(secondaryDomain.rawValue)-\(day)"
+        let dayBucket = Int(Date().timeIntervalSince1970 / 86400)
+        return "\(primaryDomain.rawValue)-\(secondaryDomain.rawValue)-\(dayBucket)"
     }
 }
 

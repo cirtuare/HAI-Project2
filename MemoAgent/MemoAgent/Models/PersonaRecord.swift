@@ -46,3 +46,4 @@ final class PersonaRecord {
         PersonaType(rawValue: personaTypeRaw)
     }
 }
+

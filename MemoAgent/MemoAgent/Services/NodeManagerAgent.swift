@@ -175,6 +175,10 @@ actor NodeManagerAgent {
         let titles = nodes.prefix(5).map { $0.title }.joined(separator: "\n- ")
         let summaryText = nodes.prefix(5).map { $0.summary }.joined(separator: " ")
 
+        // Pre-fetch main-actor-isolated values before the if/else
+        let typeLabel       = await MainActor.run { NodeType(rawValue: typeRaw)?.localizedLabel ?? typeRaw }
+        let currentProvider = await MainActor.run { AIProviderManager.shared.selectedProvider }
+
         let clusterTitle: String
         let clusterSummary: String
 
@@ -194,10 +198,10 @@ actor NodeManagerAgent {
                 clusterTitle  = response.content.title
                 clusterSummary = response.content.summary
             } catch {
-                clusterTitle  = "\(NodeType(rawValue: typeRaw)?.localizedLabel ?? typeRaw) 클러스터"
+                clusterTitle  = "\(typeLabel) 클러스터"
                 clusterSummary = "\(nodes.count)개의 관련 노드로 구성된 클러스터입니다."
             }
-        } else if AIProviderManager.shared.selectedProvider != .appleIntelligence {
+        } else if currentProvider != .appleIntelligence {
             do {
                 let response = try await AIProviderManager.shared.callAI(
                     system: "You are a knowledge clustering assistant. Respond in the same language as the input.",
@@ -205,19 +209,20 @@ actor NodeManagerAgent {
                     maxTokens: 150
                 )
                 let parsed = try? parseClusterResult(from: response)
-                clusterTitle  = parsed?.title  ?? "\(NodeType(rawValue: typeRaw)?.localizedLabel ?? typeRaw) 클러스터"
+                clusterTitle  = parsed?.title  ?? "\(typeLabel) 클러스터"
                 clusterSummary = parsed?.summary ?? "\(nodes.count)개의 관련 노드 클러스터"
             } catch {
-                clusterTitle  = "\(NodeType(rawValue: typeRaw)?.localizedLabel ?? typeRaw) 클러스터"
+                clusterTitle  = "\(typeLabel) 클러스터"
                 clusterSummary = "\(nodes.count)개의 관련 노드 클러스터"
             }
         } else {
-            clusterTitle  = "\(NodeType(rawValue: typeRaw)?.localizedLabel ?? typeRaw) 클러스터"
+            clusterTitle  = "\(typeLabel) 클러스터"
             clusterSummary = "\(nodes.count)개의 관련 노드 클러스터"
         }
 
         let personaID = nodes.first?.personaID
-        let today = ISO8601DateFormatter().string(from: Date()).prefix(10).description
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let today = String(format: "%04d-%02d-%02d", comps.year ?? 0, comps.month ?? 0, comps.day ?? 0)
 
         let cluster = NodeRecord(
             title: clusterTitle,
@@ -226,7 +231,7 @@ actor NodeManagerAgent {
             date: today,
             originalText: "AI-generated cluster from \(nodes.count) nodes of type \(typeRaw)",
             isImportant: false,
-            tags: ["AI 클러스터", NodeType(rawValue: typeRaw)?.localizedLabel ?? typeRaw],
+            tags: ["AI 클러스터", typeLabel],
             positionX: Double.random(in: -300...300),
             positionY: Double.random(in: -300...300),
             sourceSystemRaw: SourceSystem.aiGenerated.rawValue,
@@ -325,8 +330,8 @@ actor NodeManagerAgent {
     private func parseClusterResult(from text: String) throws -> ClusterResult {
         struct R: Decodable { let title: String; let summary: String }
         var clean = text
-        if let s = text.range(of: "{"), let e = text.lastIndex(of: "}") {
-            clean = String(text[s...text.index(after: e)])
+        if let s = text.firstIndex(of: "{"), let e = text.lastIndex(of: "}") {
+            clean = String(text[s...e])
         }
         guard let data = clean.data(using: .utf8) else { throw ClaudeError.parseError }
         let r = try JSONDecoder().decode(R.self, from: data)

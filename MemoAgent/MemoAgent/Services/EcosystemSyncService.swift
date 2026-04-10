@@ -17,35 +17,23 @@ actor EcosystemSyncService {
     /// Sync all enabled Apple framework sources for the given persona.
     /// Calls back to GraphViewModel on the main actor when new nodes are ready.
     func syncAll(persona: PersonaRecord, viewModel: GraphViewModel) async {
-        var allNodes: [GraphNode] = []
+        // Calendar and Reminders can run in parallel via async let
+        async let calendarFetch: [GraphNode] = EventKitSyncProvider.shared.fetchCalendarNodes(for: persona)
+        async let reminderFetch: [GraphNode] = EventKitSyncProvider.shared.fetchReminderNodes(for: persona)
+        async let healthFetch: [GraphNode]   = HealthKitSyncProvider.shared.fetchNodes(for: persona)
 
-        // Calendar and Reminders can run in parallel with each other
-        async let calendarTask = Task {
-            EventKitSyncProvider.shared.fetchCalendarNodes(for: persona)
-        }
-        async let reminderTask = Task {
-            await EventKitSyncProvider.shared.fetchReminderNodes(for: persona)
-        }
-        async let healthTask = Task {
-            await HealthKitSyncProvider.shared.fetchNodes(for: persona)
-        }
-
-        let calendarNodes  = await calendarTask.value
-        let reminderNodes  = await reminderTask.value
-        let healthNodes    = await healthTask.value
-
-        allNodes.append(contentsOf: calendarNodes)
-        allNodes.append(contentsOf: reminderNodes)
-        allNodes.append(contentsOf: healthNodes)
+        var allNodes = await calendarFetch + (await reminderFetch) + (await healthFetch)
 
         // Photos are heavier — run after the lighter sources
-        let photoNodes = PhotoKitSyncProvider.shared.fetchRecentPhotoNodes(for: persona, limit: 20)
+        let photoNodes = await PhotoKitSyncProvider.shared.fetchRecentPhotoNodes(for: persona, limit: 20)
         allNodes.append(contentsOf: photoNodes)
 
         guard !allNodes.isEmpty else { return }
 
+        // Capture as let so MainActor.run doesn't reference a captured var
+        let finalNodes = allNodes
         await MainActor.run {
-            viewModel.insertEcosystemNodes(allNodes)
+            viewModel.insertEcosystemNodes(finalNodes)
             viewModel.isSyncing = false
         }
     }
@@ -53,7 +41,7 @@ actor EcosystemSyncService {
     // MARK: - Per-Source Sync
 
     func syncCalendar(persona: PersonaRecord, viewModel: GraphViewModel) async {
-        let nodes = EventKitSyncProvider.shared.fetchCalendarNodes(for: persona)
+        let nodes = await EventKitSyncProvider.shared.fetchCalendarNodes(for: persona)
         await MainActor.run { viewModel.insertEcosystemNodes(nodes) }
     }
 
@@ -68,7 +56,7 @@ actor EcosystemSyncService {
     }
 
     func syncPhotos(persona: PersonaRecord, viewModel: GraphViewModel) async {
-        let nodes = PhotoKitSyncProvider.shared.fetchRecentPhotoNodes(for: persona, limit: 20)
+        let nodes = await PhotoKitSyncProvider.shared.fetchRecentPhotoNodes(for: persona, limit: 20)
         await MainActor.run { viewModel.insertEcosystemNodes(nodes) }
     }
 }

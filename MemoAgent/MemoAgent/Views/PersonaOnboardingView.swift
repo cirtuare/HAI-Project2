@@ -2,6 +2,7 @@
 // MemoAgent V2 — First-launch persona selection screen
 
 import SwiftUI
+import SwiftData
 
 struct PersonaOnboardingView: View {
     @Environment(GraphViewModel.self) private var vm
