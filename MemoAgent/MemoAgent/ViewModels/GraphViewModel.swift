@@ -634,7 +634,9 @@ final class GraphViewModel {
     /// Replace the full persona assignment list for a node (single-assignment path, used by inspector menu).
     func assignPersona(_ personaID: String?, to nodeID: String) {
         guard let idx = nodes.firstIndex(where: { $0.id == nodeID }) else { return }
-        nodes[idx].personaIDs = [personaID].compactMap { $0 }
+        var updated = nodes[idx]
+        updated.personaIDs = [personaID].compactMap { $0 }
+        nodes[idx] = updated   // explicit replacement — triggers @Observable setter
         persistGraph()
     }
 
@@ -642,14 +644,18 @@ final class GraphViewModel {
     func addPersona(_ personaID: String, to nodeID: String) {
         guard let idx = nodes.firstIndex(where: { $0.id == nodeID }),
               !nodes[idx].personaIDs.contains(personaID) else { return }
-        nodes[idx].personaIDs.append(personaID)
+        var updated = nodes[idx]
+        updated.personaIDs.append(personaID)
+        nodes[idx] = updated   // explicit replacement — triggers @Observable setter
         persistGraph()
     }
 
     /// Remove a persona from a node's assignment list.
     func removePersona(_ personaID: String, from nodeID: String) {
         guard let idx = nodes.firstIndex(where: { $0.id == nodeID }) else { return }
-        nodes[idx].personaIDs.removeAll { $0 == personaID }
+        var updated = nodes[idx]
+        updated.personaIDs.removeAll { $0 == personaID }
+        nodes[idx] = updated   // explicit replacement — triggers @Observable setter
         persistGraph()
     }
 
@@ -1379,9 +1385,11 @@ final class GraphViewModel {
 
     /// Delete a persona. Nodes assigned to it lose that persona (remaining assignments preserved).
     func deletePersona(id: String) {
-        // Unassign nodes before deleting
+        // Unassign nodes before deleting — explicit replacement triggers @Observable setter
         for idx in nodes.indices where nodes[idx].personaIDs.contains(id) {
-            nodes[idx].personaIDs.removeAll { $0 == id }
+            var updated = nodes[idx]
+            updated.personaIDs.removeAll { $0 == id }
+            nodes[idx] = updated
         }
         persistGraph()
 
@@ -1646,6 +1654,7 @@ final class GraphViewModel {
         case .hobby:    relevantSourceRaws = [SourceSystem.photos.rawValue]
         case .academic: relevantSourceRaws = [SourceSystem.calendar.rawValue,
                                                SourceSystem.reminders.rawValue]
+        case .other:    relevantSourceRaws = []
         }
 
         // Find persona record to match by personaID too

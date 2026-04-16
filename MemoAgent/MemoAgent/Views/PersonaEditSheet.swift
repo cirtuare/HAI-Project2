@@ -37,7 +37,12 @@ struct PersonaEditSheet: View {
         if isEditMode {
             return !customName.trimmingCharacters(in: .whitespaces).isEmpty
         } else {
-            return selectedType != nil
+            guard selectedType != nil else { return false }
+            // If this type already exists, a custom name is required to distinguish personas
+            let typeAlreadyExists = selectedType.map { t in
+                vm.personas.contains { $0.personaType == t }
+            } ?? false
+            return !typeAlreadyExists || !customName.trimmingCharacters(in: .whitespaces).isEmpty
         }
     }
 
@@ -126,7 +131,7 @@ struct PersonaEditSheet: View {
                 .foregroundStyle(.secondary)
                 .kerning(0.5)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(PersonaType.allCases, id: \.self) { type in
                     typeCell(type)
                 }
@@ -137,13 +142,11 @@ struct PersonaEditSheet: View {
     private func typeCell(_ type: PersonaType) -> some View {
         let accent = Color(hex: type.accentHex)
         let isSelected = selectedType == type
-        let alreadyExists = vm.personas.contains { $0.personaType == type }
+        let existingCount = vm.personas.filter { $0.personaType == type }.count
 
         return Button {
-            if !alreadyExists {
-                withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
-                    selectedType = type
-                }
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
+                selectedType = type
             }
         } label: {
             VStack(spacing: 6) {
@@ -178,31 +181,32 @@ struct PersonaEditSheet: View {
                             )
                     )
             )
-            .opacity(alreadyExists && !isSelected ? 0.4 : 1.0)
             .overlay(
-                // "이미 추가됨" badge
-                alreadyExists && !isSelected
-                    ? Text("추가됨")
+                // Count badge when one or more personas of this type already exist
+                existingCount > 0
+                    ? Text("\(existingCount)")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.secondary.opacity(0.5)))
+                        .background(Capsule().fill(accent.opacity(0.7)))
                         .padding(6)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     : nil
             )
         }
         .buttonStyle(.plain)
-        .allowsHitTesting(!alreadyExists)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 
     private var nameFieldSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(isEditMode ? "새 이름" : "이름 (선택 사항)")
+            let nameRequired = !isEditMode && (selectedType.map { t in
+                vm.personas.contains { $0.personaType == t }
+            } ?? false)
+            Text(isEditMode ? "새 이름" : (nameRequired ? "이름 (필수 — 같은 유형이 이미 있습니다)" : "이름 (선택 사항)"))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(nameRequired ? Color.orange.opacity(0.8) : .secondary)
                 .kerning(0.5)
 
             HStack(spacing: 8) {
@@ -216,7 +220,11 @@ struct PersonaEditSheet: View {
                 TextField(
                     isEditMode
                         ? (editing?.name ?? "")
-                        : (selectedType.map { "기본: \($0.localizedName)" } ?? "이름 입력"),
+                        : (selectedType.map { t in
+                            vm.personas.contains(where: { $0.personaType == t })
+                                ? "예: 포켓몬스터, 넷플릭스…"
+                                : "기본: \(t.localizedName)"
+                          } ?? "이름 입력"),
                     text: $customName
                 )
                 .textFieldStyle(.plain)

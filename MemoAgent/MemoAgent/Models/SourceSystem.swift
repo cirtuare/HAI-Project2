@@ -51,6 +51,7 @@ enum PersonaType: String, CaseIterable, Codable {
     case academic = "Academic"
     case finance  = "Finance"
     case hobby    = "Hobby"
+    case other    = "Other"
 
     // MARK: - Deprecated raw values (kept for migration, do not use in new code)
     // "Work"    → removed; "Medical" → "Health"; "Personal" → "Hobby"
@@ -61,6 +62,7 @@ enum PersonaType: String, CaseIterable, Codable {
         case .academic: return "학업"
         case .finance:  return "금융"
         case .hobby:    return "취미"
+        case .other:    return "기타"
         }
     }
 
@@ -70,6 +72,7 @@ enum PersonaType: String, CaseIterable, Codable {
         case .academic: return "논문, 강의 노트, 연구 자료 관리"
         case .finance:  return "지출, 예산, 재무 계획 관리"
         case .hobby:    return "일기, 사진, 창작, 취미 활동 기록"
+        case .other:    return "분류하기 어려운 기타 주제 관리"
         }
     }
 
@@ -79,6 +82,7 @@ enum PersonaType: String, CaseIterable, Codable {
         case .academic: return "graduationcap.fill"
         case .finance:  return "creditcard.fill"
         case .hobby:    return "paintpalette.fill"
+        case .other:    return "ellipsis.circle.fill"
         }
     }
 
@@ -88,6 +92,7 @@ enum PersonaType: String, CaseIterable, Codable {
         case .academic: return "#7F77DD"   // purple
         case .finance:  return "#EF9F27"   // amber
         case .hobby:    return "#D85A30"   // coral
+        case .other:    return "#64748b"   // slate
         }
     }
 
@@ -102,6 +107,8 @@ enum PersonaType: String, CaseIterable, Codable {
             return "You are managing a personal finance knowledge base. Focus on spending patterns, budget analysis, and financial insights. Be objective and data-driven."
         case .hobby:
             return "You are managing a personal hobby and lifestyle space. Focus on creative connections, memorable experiences, personal growth, and leisure activities. Be empathetic and reflective."
+        case .other:
+            return "You are managing a general-purpose knowledge base. Adapt your tone and focus to the content provided, helping the user organize and connect information across diverse topics."
         }
     }
 
@@ -116,7 +123,7 @@ enum PersonaType: String, CaseIterable, Codable {
             return ["sleepAnalysis", "mindfulSession", "stepCount"]
         case .hobby:
             return ["stepCount", "sleepAnalysis", "activeEnergyBurned"]
-        case .finance:
+        case .finance, .other:
             return []
         }
     }

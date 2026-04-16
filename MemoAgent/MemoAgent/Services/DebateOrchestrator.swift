@@ -69,6 +69,7 @@ private enum SpecialistRole: String {
         case .academic: return .academic
         case .finance:  return .finance
         case .hobby:    return .hobby
+        case .other:    return .hobby   // fallback: general-purpose uses hobby role
         }
     }
 

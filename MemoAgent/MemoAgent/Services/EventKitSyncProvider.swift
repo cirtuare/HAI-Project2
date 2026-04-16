@@ -131,7 +131,7 @@ final class EventKitSyncProvider {
         case .academic: keywords = ["학교", "수업", "강의", "study", "academic"]
         case .health:   keywords = ["건강", "병원", "의료", "운동", "health", "medical"]
         case .finance:  keywords = ["재무", "투자", "지출", "finance"]
-        case .hobby:    keywords = []
+        case .hobby, .other: keywords = []
         }
         if keywords.isEmpty { return all }
         let filtered = all.filter { cal in

@@ -244,16 +244,16 @@ struct DetailInspectorView: View {
             }
 
             VStack(spacing: 4) {
-                // "없음 (전체 공유)" toggle
+                // "없음 (전체 공유)" toggle — read from vm.nodes for live @Observable tracking
+                let livePersonaIDs = vm.nodes.first(where: { $0.id == node.id })?.personaIDs
+                                     ?? node.personaIDs
                 personaToggleRow(
-                    isOn: node.personaIDs.isEmpty,
+                    isOn: livePersonaIDs.isEmpty,
                     label: "없음 (전체 공유)",
                     icon: "globe",
                     accentHex: "#64748b"
                 ) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                        vm.assignPersona(nil, to: node.id)
-                    }
+                    vm.assignPersona(nil, to: node.id)
                 }
 
                 if !vm.personas.isEmpty {
@@ -262,19 +262,21 @@ struct DetailInspectorView: View {
                         .padding(.vertical, 2)
 
                     ForEach(vm.personas, id: \.id) { persona in
-                        let isAssigned = node.personaIDs.contains(persona.id)
+                        // Read personaIDs from vm.nodes directly so @Observable tracks
+                        // this access and re-renders when addPersona/removePersona fires.
+                        let liveIDs = vm.nodes.first(where: { $0.id == node.id })?.personaIDs
+                                      ?? node.personaIDs
+                        let isAssigned = liveIDs.contains(persona.id)
                         personaToggleRow(
                             isOn: isAssigned,
                             label: persona.name,
                             icon: persona.personaType?.icon ?? "person.fill",
                             accentHex: persona.accentColorHex
                         ) {
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                                if isAssigned {
-                                    vm.removePersona(persona.id, from: node.id)
-                                } else {
-                                    vm.addPersona(persona.id, to: node.id)
-                                }
+                            if isAssigned {
+                                vm.removePersona(persona.id, from: node.id)
+                            } else {
+                                vm.addPersona(persona.id, to: node.id)
                             }
                         }
                     }

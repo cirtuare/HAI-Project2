@@ -13,9 +13,9 @@
 | 1B   | `Done`    |   High   | 노드별 담당 페르소나 사용자 수동 지정 기능 추가                                                                                       | DetailInspectorView.swift, GraphViewModel.swift                                                                                                                                            |
 | 2    | `Done`    |   Med    | 페르소나 사용자 수동 추가/수정/삭제 기능 구현                                                                                         | LeftSidebarView.swift, PersonaEditSheet.swift, GraphViewModel.swift                                                                                                                        |
 | 3    | `Done`    |   Med    | 데이터 추가 시 담당 페르소나 사용자 수동 지정 기능 추가                                                                               | SmartInputModalView.swift, GraphViewModel.swift                                                                                                                                            |
-| 4    | `Pending` | Critical | 노드별 담당 페르소나 선택 시 체크 표시가 제대로 표시되지 않는 오류 수정                                                               |
-| 5    | `Pending` |   Med    | 페르소나 유형에 "기타" 추가                                                                                                           |
-| 6    | `Pending` |   High   | 유형별로 한 개의 페르소나만 만들 수 있는 제약 해제 (ex: "취미" 유형의 페르소나로 "포켓몬스터", "넷플릭스" 등을 각각 추가할 수 있도록) |
+| 4    | `Done`    | Critical | 노드별 상세 정보 UI에서 담당 페르소나 선택 시 체크박스 내 체크 표시가 제대로 표시되지 않는 오류 수정                                  | GraphViewModel.swift, DetailInspectorView.swift |
+| 5    | `Done`    |   Med    | 페르소나 유형에 "기타" 추가                                                                                                           | SourceSystem.swift |
+| 6    | `Done`    |   High   | 유형별로 한 개의 페르소나만 만들 수 있는 제약 해제 (ex: "취미" 유형의 페르소나로 "포켓몬스터", "넷플릭스" 등을 각각 추가할 수 있도록) | PersonaEditSheet.swift |
 
 ---
 
@@ -30,3 +30,6 @@
 - **2026-04-16:** Task 3 완료 — SmartInputModal 좌측 컬럼 하단 페르소나 피커 추가, commitModalNodes/commitScreenTimeReport/commitFinanceStatement에 수동 지정 반영.
 - **2026-04-16:** Task 1A 완료 — personaID: String? → personaIDs: [String] 전환. NodeRecord 구버전 호환 유지, GraphNode Codable 레거시 폴백, VM add/removePersona 추가, Inspector 다중 선택 토글 UI, NodeCard 다중 dot 시각화.
 - **2026-04-16:** Task 4, 5, 6 추가
+- **2026-04-16:** Task 4 완료 — @Observable 중첩 변이 미감지 버그 수정. assignPersona/addPersona/removePersona/deletePersona에서 nodes[idx] 직접 교체 패턴 적용. DetailInspectorView에서 isAssigned를 vm.nodes에서 직접 조회하도록 변경.
+- **2026-04-16:** Task 5 완료 — PersonaType에 .other("기타") 케이스 추가. icon: ellipsis.circle.fill, accentHex: #64748b.
+- **2026-04-16:** Task 6 완료 — PersonaEditSheet에서 alreadyExists 제약 제거. 같은 유형 이미 존재 시 이름 입력 필수, 배지를 "추가됨" → 기존 개수 표시로 변경. 그리드 2열→3열.
