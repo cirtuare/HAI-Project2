@@ -72,7 +72,7 @@ final class EventKitSyncProvider {
                 position: randomCanvasPosition(),
                 sourceSystem: .calendar,
                 externalID: event.eventIdentifier,
-                personaID: persona.id
+                personaIDs: [persona.id]
             )
         }
     }
@@ -112,7 +112,7 @@ final class EventKitSyncProvider {
                         position: self.randomCanvasPosition(),
                         sourceSystem: .reminders,
                         externalID: reminder.calendarItemIdentifier,
-                        personaID: persona.id
+                        personaIDs: [persona.id]
                     )
                 }
                 continuation.resume(returning: nodes)
@@ -128,11 +128,10 @@ final class EventKitSyncProvider {
         guard let pType = persona.personaType else { return all }
         let keywords: [String]
         switch pType {
-        case .work:     keywords = ["업무", "work", "회사", "미팅", "meeting"]
         case .academic: keywords = ["학교", "수업", "강의", "study", "academic"]
-        case .medical:  keywords = ["건강", "병원", "의료", "health", "medical"]
-        case .finance:  keywords = ["재무", "투자", "finance"]
-        case .personal: keywords = []
+        case .health:   keywords = ["건강", "병원", "의료", "운동", "health", "medical"]
+        case .finance:  keywords = ["재무", "투자", "지출", "finance"]
+        case .hobby:    keywords = []
         }
         if keywords.isEmpty { return all }
         let filtered = all.filter { cal in

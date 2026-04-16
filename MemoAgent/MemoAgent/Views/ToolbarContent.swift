@@ -24,10 +24,11 @@ struct NodeMindToolbar: ToolbarContent {
             searchField
         }
 
-        // ── Trailing: Sync status + Settings + Add data ──────────────────
+        // ── Trailing: Sync status + Chat + Settings + Add data ──────────────────
         ToolbarItem(placement: .primaryAction) {
             HStack(spacing: 8) {
                 syncStatusButton
+                chatButton
                 settingsButton
                 addDataButton
             }
@@ -169,6 +170,44 @@ struct NodeMindToolbar: ToolbarContent {
         .buttonStyle(.plain)
         .help("AI 설정")
         .keyboardShortcut(",", modifiers: [.command])
+    }
+
+    private var chatButton: some View {
+        Button {
+            vm.openChat()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 12, weight: .medium))
+                if let persona = vm.activePersona {
+                    Circle()
+                        .fill(Color(hex: persona.accentColorHex))
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .foregroundStyle(vm.isChatPresented ? Color.cyan : Color.white.opacity(0.55))
+            .frame(width: 30, height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        vm.isChatPresented
+                            ? Color.cyan.opacity(0.15)
+                            : Color.primary.opacity(0.07)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                vm.isChatPresented
+                                    ? Color.cyan.opacity(0.4)
+                                    : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help("페르소나 채팅")
+        .keyboardShortcut("k", modifiers: [.command, .shift])
     }
 
     private var addDataButton: some View {

@@ -237,11 +237,11 @@ struct EcosystemPermissionsView: View {
                     try? await HealthKitSyncProvider.shared.requestAuthorization(for: persona)
                 }
             case .calendar:
-                try? await EventKitSyncProvider.shared.requestCalendarAccess()
+                _ = try? await EventKitSyncProvider.shared.requestCalendarAccess()
             case .reminders:
-                try? await EventKitSyncProvider.shared.requestReminderAccess()
+                _ = try? await EventKitSyncProvider.shared.requestReminderAccess()
             case .photos:
-                await PhotoKitSyncProvider.shared.requestAuthorization()
+                _ = await PhotoKitSyncProvider.shared.requestAuthorization()
             }
             await MainActor.run { refreshStatuses() }
         }

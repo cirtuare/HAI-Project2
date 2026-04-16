@@ -31,8 +31,10 @@ enum ViewMode: String, CaseIterable, Hashable {
 
 /// Tabs inside the SmartInputModal.
 enum InputTab: String, CaseIterable {
-    case text = "텍스트 입력"
-    case file = "파일 업로드"
+    case text       = "텍스트 입력"
+    case file       = "파일 업로드"
+    case screenTime = "스크린타임"
+    case finance    = "지출 내역"
 }
 
 // MARK: - ProcessStep
@@ -116,6 +118,39 @@ final class GraphViewModel {
     var lastSyncDate: Date? = nil
 
     // ─────────────────────────────────────────────
+    // MARK: V2 — Persona Router State
+    // ─────────────────────────────────────────────
+
+    /// Personas suggested by PersonaRouter for the current chat query.
+    var suggestedPersonas: [PersonaType] = []
+    /// Persona type that NodeManagerAgent recommends creating (node threshold exceeded).
+    var pendingPersonaSuggestion: PersonaType? = nil
+
+    // ─────────────────────────────────────────────
+    // MARK: V2 — Multi-Persona Chat State
+    // ─────────────────────────────────────────────
+
+    /// Whether the multi-persona chat sheet is open.
+    var isChatPresented: Bool = false
+    /// Current active chat session (multi-persona).
+    var activeChatSession: ChatSession? = nil
+    /// Messages in the current chat session (in-memory mirror for the view).
+    var chatMessages: [ChatMessage] = []
+    /// Persona types the user has selected for the current chat session.
+    var chatSelectedPersonaTypes: Set<PersonaType> = []
+    /// True while waiting for persona AI responses.
+    var isChatLoading: Bool = false
+    /// Error string shown in the chat UI.
+    var chatError: String? = nil
+
+    // ── Single-Persona (1:1) Chat ─────────────────
+    var isSingleChatPresented: Bool = false
+    var singleChatPersonaType: PersonaType? = nil
+    var singleChatSession: ChatSession? = nil
+    var singleChatMessages: [ChatMessage] = []
+    var isSingleChatLoading: Bool = false
+
+    // ─────────────────────────────────────────────
     // MARK: V2 — Multi-Agent Debate State
     // ─────────────────────────────────────────────
 
@@ -125,6 +160,12 @@ final class GraphViewModel {
     var activeDebateResult: String? = nil
     /// Node IDs currently being analyzed by the debate agents (shown with pulse glow).
     var debateEvidenceNodeIDs: Set<String> = []
+    /// All AgentTurns from the current/most-recent debate (streamed in real time).
+    var liveDebateTurns: [AgentTurn] = []
+    /// Whether the live debate visualization sheet is open.
+    var isLiveDebatePresented: Bool = false
+    /// Full transcript of the most recently completed debate.
+    var activeDebateTranscript: [AgentTurn] = []
 
     // MARK: - Persistence (SwiftData)
 
@@ -172,6 +213,23 @@ final class GraphViewModel {
         let ctx = modelContext
         Task {
             await NodeManagerAgent.shared.runPatternDetection(context: ctx, viewModel: self)
+        }
+    }
+
+    /// Manually trigger a multi-agent debate for the given persona types and user query.
+    /// Opens LiveDebateView immediately; results populate activeDebateResult when done.
+    @MainActor
+    func triggerManualDebate(personaTypes: [PersonaType], query: String) {
+        liveDebateTurns = []
+        isLiveDebatePresented = true
+        let ctx = modelContext
+        Task {
+            await DebateOrchestrator.shared.startManualDebate(
+                personaTypes: personaTypes,
+                query: query,
+                context: ctx,
+                viewModel: self
+            )
         }
     }
 
@@ -296,11 +354,11 @@ final class GraphViewModel {
     /// Views use this instead of `nodes` directly.
     var visibleNodes: [GraphNode] {
         nodes.filter { node in
-            // Persona filter: show node if (1) no active persona, (2) node has no persona
-            // (global), or (3) node belongs to the active persona.
+            // Persona filter: show node if (1) no active persona, (2) node is global (no personas),
+            // or (3) node is assigned to the active persona.
             if let persona = activePersona {
-                let isGlobal = node.personaID == nil
-                let belongsHere = node.personaID == persona.id
+                let isGlobal = node.personaIDs.isEmpty
+                let belongsHere = node.personaIDs.contains(persona.id)
                 guard isGlobal || belongsHere else { return false }
             }
             // Type filter
@@ -363,6 +421,20 @@ final class GraphViewModel {
     var modalAnalysedNodes: [ExtractedNodeData] = []
     /// AI availability error message for the modal.
     var modalAIError: String? = nil
+
+    // ── Screen Time tab state ──────────────────────────────────────────
+    var modalScreenTimeInput: String = ""
+    var modalScreenTimeSaving: Bool = false
+    var modalScreenTimeSavedCount: Int = 0
+
+    // ── Finance tab state ──────────────────────────────────────────────
+    var modalFinanceInput: String = ""
+    var modalFinanceSaving: Bool = false
+    var modalFinanceSavedCount: Int = 0
+
+    // ── Persona override (all tabs) ─────────────────────────────────────
+    /// Persona manually selected by the user in the modal. Overrides auto-detect.
+    var modalSelectedPersonaID: String? = nil
 
     // ─────────────────────────────────────────────
     // MARK: Prompt Composer State (DetailDrawer)
@@ -555,6 +627,29 @@ final class GraphViewModel {
         edges.removeAll { $0.sourceID == id || $0.targetID == id }
         selectedNodeIDs.remove(id)
         if selectedNodeIDs.isEmpty { isInspectorPresented = false }
+        persistGraph()
+    }
+
+    /// Assign (or remove) a persona from a node. Pass nil to make it globally visible.
+    /// Replace the full persona assignment list for a node (single-assignment path, used by inspector menu).
+    func assignPersona(_ personaID: String?, to nodeID: String) {
+        guard let idx = nodes.firstIndex(where: { $0.id == nodeID }) else { return }
+        nodes[idx].personaIDs = [personaID].compactMap { $0 }
+        persistGraph()
+    }
+
+    /// Add a persona to a node's assignment list (multi-persona path).
+    func addPersona(_ personaID: String, to nodeID: String) {
+        guard let idx = nodes.firstIndex(where: { $0.id == nodeID }),
+              !nodes[idx].personaIDs.contains(personaID) else { return }
+        nodes[idx].personaIDs.append(personaID)
+        persistGraph()
+    }
+
+    /// Remove a persona from a node's assignment list.
+    func removePersona(_ personaID: String, from nodeID: String) {
+        guard let idx = nodes.firstIndex(where: { $0.id == nodeID }) else { return }
+        nodes[idx].personaIDs.removeAll { $0 == personaID }
         persistGraph()
     }
 
@@ -817,6 +912,8 @@ final class GraphViewModel {
         let baseAngle = Double.random(in: 0..<(2 * .pi))
         let radius: CGFloat = 200
 
+        let assignedPersonaIDs: [String] = [modalSelectedPersonaID].compactMap { $0 }
+
         let nodesToAdd: [GraphNode]
         if modalAnalysedNodes.isEmpty {
             // Plain fallback: one node from title+body, placed at viewport centre
@@ -829,7 +926,8 @@ final class GraphViewModel {
                 originalText: bodyText,
                 isImportant: false,
                 tags: [],
-                position: CGPoint(x: vcx, y: vcy)
+                position: CGPoint(x: vcx, y: vcy),
+                personaIDs: assignedPersonaIDs
             )]
         } else {
             nodesToAdd = modalAnalysedNodes.enumerated().map { idx, extracted in
@@ -853,7 +951,8 @@ final class GraphViewModel {
                     originalText: bodyText,
                     isImportant: extracted.isImportant,
                     tags: tagList,
-                    position: CGPoint(x: vcx + offsetX, y: vcy + offsetY)
+                    position: CGPoint(x: vcx + offsetX, y: vcy + offsetY),
+                    personaIDs: assignedPersonaIDs
                 )
             }
         }
@@ -889,6 +988,138 @@ final class GraphViewModel {
         modalProcessStep = .idle
         modalUploadFileName = nil
         modalUploadFileLoaded = false
+        modalScreenTimeInput = ""
+        modalScreenTimeSaving = false
+        modalScreenTimeSavedCount = 0
+        modalFinanceInput = ""
+        modalFinanceSaving = false
+        modalFinanceSavedCount = 0
+        modalSelectedPersonaID = nil
+    }
+
+    // ── Screen Time commit ─────────────────────────────────────────────
+
+    @MainActor
+    func commitScreenTimeReport() {
+        let text = modalScreenTimeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !modalScreenTimeSaving else { return }
+
+        // Manual override takes priority; fall back to auto-detect (health) or active persona
+        let targetPersona: PersonaRecord?
+        if let overrideID = modalSelectedPersonaID {
+            targetPersona = personas.first(where: { $0.id == overrideID })
+        } else {
+            targetPersona = personas.first(where: { $0.personaType == .health }) ?? activePersona
+        }
+
+        guard let persona = targetPersona else {
+            // No persona available — still save as unattached nodes
+            commitScreenTimeReportUnattached(text: text)
+            return
+        }
+
+        modalScreenTimeSaving = true
+        Task {
+            await EcosystemSyncService.shared.syncScreenTime(
+                reportText: text,
+                persona: persona,
+                viewModel: self,
+                context: modelContext
+            )
+            await MainActor.run {
+                // Count how many nodes were inserted (approximate via modalScreenTimeSavedCount)
+                modalScreenTimeSavedCount = 1  // summary node always created
+                modalScreenTimeSaving = false
+            }
+        }
+    }
+
+    @MainActor
+    private func commitScreenTimeReportUnattached(text: String) {
+        // Fallback: parse and create a placeholder persona-less node
+        modalScreenTimeSaving = true
+        Task {
+            let (total, categories) = await ScreenTimeSyncProvider.shared.parse(text)
+            let placeholder = PersonaRecord(
+                name: "건강",
+                personaTypeRaw: PersonaType.health.rawValue,
+                systemPromptContext: PersonaType.health.systemPromptContext,
+                accentColorHex: PersonaType.health.accentHex
+            )
+            let nodes = await ScreenTimeSyncProvider.shared.createNodes(
+                reportText: text,
+                total: total,
+                categories: categories,
+                persona: placeholder
+            )
+            await MainActor.run {
+                insertEcosystemNodes(nodes)
+                modalScreenTimeSavedCount = nodes.count
+                modalScreenTimeSaving = false
+            }
+        }
+    }
+
+    // ── Finance commit ─────────────────────────────────────────────────
+
+    @MainActor
+    func commitFinanceStatement() {
+        let text = modalFinanceInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !modalFinanceSaving else { return }
+
+        // Manual override takes priority; fall back to auto-detect (finance) or active persona
+        let targetPersona: PersonaRecord?
+        if let overrideID = modalSelectedPersonaID {
+            targetPersona = personas.first(where: { $0.id == overrideID })
+        } else {
+            targetPersona = personas.first(where: { $0.personaType == .finance }) ?? activePersona
+        }
+
+        guard let persona = targetPersona else {
+            commitFinanceStatementUnattached(text: text)
+            return
+        }
+
+        modalFinanceSaving = true
+        Task {
+            let count = await EcosystemSyncService.shared.syncFinance(
+                statementText: text,
+                source: .text,
+                persona: persona,
+                viewModel: self,
+                context: modelContext
+            )
+            await MainActor.run {
+                modalFinanceSavedCount = count
+                modalFinanceSaving = false
+            }
+        }
+    }
+
+    @MainActor
+    private func commitFinanceStatementUnattached(text: String) {
+        modalFinanceSaving = true
+        Task {
+            let entries = await FinanceSyncProvider.shared.parse(text, source: .text)
+            let placeholder = PersonaRecord(
+                name: "금융",
+                personaTypeRaw: PersonaType.finance.rawValue,
+                systemPromptContext: PersonaType.finance.systemPromptContext,
+                accentColorHex: PersonaType.finance.accentHex
+            )
+            let nodes = await FinanceSyncProvider.shared.createNodes(
+                entries: entries,
+                rawText: text,
+                persona: placeholder
+            )
+            for entry in entries { modelContext.insert(entry) }
+            try? modelContext.save()
+            await MainActor.run {
+                insertEcosystemNodes(nodes)
+                modalFinanceSavedCount = entries.count
+                modalFinanceSaving = false
+            }
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -1139,6 +1370,37 @@ final class GraphViewModel {
     // MARK: - V2 Persona Management
     // ─────────────────────────────────────────────
 
+    /// Insert a new PersonaRecord into SwiftData and refresh the persona list.
+    func createPersona(_ record: PersonaRecord) {
+        modelContext.insert(record)
+        try? modelContext.save()
+        personas = (try? modelContext.fetch(FetchDescriptor<PersonaRecord>())) ?? []
+    }
+
+    /// Delete a persona. Nodes assigned to it lose that persona (remaining assignments preserved).
+    func deletePersona(id: String) {
+        // Unassign nodes before deleting
+        for idx in nodes.indices where nodes[idx].personaIDs.contains(id) {
+            nodes[idx].personaIDs.removeAll { $0 == id }
+        }
+        persistGraph()
+
+        guard let record = personas.first(where: { $0.id == id }) else { return }
+        if activePersona?.id == id { clearPersona() }
+        modelContext.delete(record)
+        try? modelContext.save()
+        personas = (try? modelContext.fetch(FetchDescriptor<PersonaRecord>())) ?? []
+    }
+
+    /// Rename a persona.
+    func updatePersonaName(id: String, name: String) {
+        guard let record = personas.first(where: { $0.id == id }),
+              !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        record.name = name.trimmingCharacters(in: .whitespaces)
+        try? modelContext.save()
+        personas = (try? modelContext.fetch(FetchDescriptor<PersonaRecord>())) ?? []
+    }
+
     /// Select a persona and deactivate all others.
     func activatePersona(_ persona: PersonaRecord) {
         for p in personas { p.isActive = false }
@@ -1194,6 +1456,328 @@ final class GraphViewModel {
         lastSyncDate = Date()
     }
 
+    // ─────────────────────────────────────────────
+    // MARK: - Multi-Persona Chat
+    // ─────────────────────────────────────────────
+
+    /// Open the chat sheet and route the initial query if non-empty.
+    @MainActor
+    func openChat(initialQuery: String = "") {
+        chatError = nil
+        isChatPresented = true
+        guard !initialQuery.isEmpty else { return }
+        // Pre-populate persona suggestions using keyword fallback (sync, no await needed)
+        let suggested = PersonaRouter.shared.keywordRoute(query: initialQuery)
+        let available = Set(personas.compactMap { $0.personaType })
+        chatSelectedPersonaTypes = Set(suggested.filter { available.contains($0) })
+        suggestedPersonas = Array(chatSelectedPersonaTypes)
+    }
+
+    /// Create a new ChatSession, send the user's query, then collect one response
+    /// per selected persona in parallel.
+    @MainActor
+    func startChatSession(query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isChatLoading else { return }
+
+        let selectedTypes = Array(chatSelectedPersonaTypes)
+        guard !selectedTypes.isEmpty else {
+            chatError = "최소 한 개의 페르소나를 선택하세요."
+            return
+        }
+
+        chatError = nil
+        isChatLoading = true
+
+        // Create a new session
+        let session = ChatSession(
+            title: String(trimmed.prefix(40)),
+            selectedPersonaTypeRaws: selectedTypes.map { $0.rawValue }
+        )
+        modelContext.insert(session)
+
+        // User message
+        let userMsg = ChatMessage(role: ChatRole.user, content: trimmed)
+        userMsg.session = session
+        modelContext.insert(userMsg)
+
+        activeChatSession = session
+        chatMessages = [userMsg]
+
+        try? modelContext.save()
+
+        Task {
+            await generatePersonaResponses(
+                query: trimmed,
+                session: session,
+                personaTypes: selectedTypes
+            )
+        }
+    }
+
+    /// Send a follow-up message to an existing session.
+    @MainActor
+    func sendChatMessage(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isChatLoading,
+              let session = activeChatSession else { return }
+
+        chatError = nil
+        isChatLoading = true
+
+        let userMsg = ChatMessage(role: ChatRole.user, content: trimmed)
+        userMsg.session = session
+        modelContext.insert(userMsg)
+        chatMessages.append(userMsg)
+        try? modelContext.save()
+
+        let selectedTypes = session.selectedPersonaTypes
+        Task {
+            await generatePersonaResponses(
+                query: trimmed,
+                session: session,
+                personaTypes: selectedTypes
+            )
+        }
+    }
+
+    /// Sendable DTO carrying persona response content across concurrency boundaries.
+    /// Using a DTO avoids passing non-Sendable @Model objects between tasks.
+    private struct PersonaResponseDTO: Sendable {
+        let personaTypeRaw: String
+        let content: String
+    }
+
+    private func generatePersonaResponses(
+        query: String,
+        session: ChatSession,
+        personaTypes: [PersonaType]
+    ) async {
+        // Extract only the Sendable string we need from MainActor — never pass ChatMessage across boundary
+        let historyText = await MainActor.run {
+            chatMessages.suffix(6).map { msg -> String in
+                let prefix = msg.role == ChatRole.user ? "사용자" :
+                             (msg.personaType?.localizedName ?? "시스템")
+                return "[\(prefix)] \(msg.content)"
+            }.joined(separator: "\n")
+        }
+
+        // Generate each persona's response — task group returns Sendable DTOs
+        let responses: [PersonaResponseDTO] = await withTaskGroup(of: PersonaResponseDTO?.self) { group in
+            for pType in personaTypes {
+                group.addTask {
+                    await self.generateResponse(for: pType, query: query, history: historyText)
+                }
+            }
+            var results: [PersonaResponseDTO] = []
+            for await dto in group {
+                if let dto { results.append(dto) }
+            }
+            return results
+        }
+
+        // Create ChatMessage objects and persist — all on the main actor
+        await MainActor.run {
+            let order = personaTypes.map { $0.rawValue }
+            let sorted = responses.sorted {
+                (order.firstIndex(of: $0.personaTypeRaw) ?? 99) <
+                (order.firstIndex(of: $1.personaTypeRaw) ?? 99)
+            }
+            for dto in sorted {
+                let msg = ChatMessage(
+                    role: ChatRole.persona,
+                    personaTypeRaw: dto.personaTypeRaw,
+                    content: dto.content
+                )
+                msg.session = session
+                modelContext.insert(msg)
+                chatMessages.append(msg)
+            }
+            isChatLoading = false
+            try? modelContext.save()
+        }
+    }
+
+    private func generateResponse(
+        for personaType: PersonaType,
+        query: String,
+        history: String
+    ) async -> PersonaResponseDTO? {
+        // Collect relevant node context for this persona
+        let nodeContext = await MainActor.run { buildNodeContext(for: personaType) }
+
+        let systemPrompt = """
+            \(personaType.systemPromptContext)
+
+            당신은 '\(personaType.localizedName)' 페르소나입니다.
+            사용자의 고민에 대해 이 페르소나의 관점에서 구체적이고 실질적인 조언을 한국어로 제공하세요.
+            다른 페르소나가 있다는 사실을 언급하지 마세요. 오직 이 관점에서만 답변하세요.
+            응답은 3~5문장 이내로 간결하게 작성하세요.
+            \(nodeContext.isEmpty ? "" : "\n[관련 데이터]\n\(nodeContext)")
+            """
+
+        let userMessage = history.isEmpty
+            ? query
+            : "\(history)\n\n[새 메시지] \(query)"
+
+        do {
+            let content = try await AIProviderManager.shared.callAI(
+                system: systemPrompt,
+                userMessage: userMessage,
+                maxTokens: 400
+            )
+            return PersonaResponseDTO(personaTypeRaw: personaType.rawValue, content: content)
+        } catch {
+            return PersonaResponseDTO(
+                personaTypeRaw: personaType.rawValue,
+                content: "응답 생성에 실패했습니다: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /// Build a brief summary of the most recent nodes relevant to a persona type.
+    @MainActor
+    private func buildNodeContext(for personaType: PersonaType) -> String {
+        let relevantSourceRaws: [String]
+        switch personaType {
+        case .health:   relevantSourceRaws = [SourceSystem.healthKit.rawValue,
+                                               SourceSystem.screenTime.rawValue]
+        case .finance:  relevantSourceRaws = [SourceSystem.finance.rawValue]
+        case .hobby:    relevantSourceRaws = [SourceSystem.photos.rawValue]
+        case .academic: relevantSourceRaws = [SourceSystem.calendar.rawValue,
+                                               SourceSystem.reminders.rawValue]
+        }
+
+        // Find persona record to match by personaID too
+        let personaIDs = personas
+            .filter { $0.personaType == personaType }
+            .map { $0.id }
+
+        let relevant = nodes.filter { node in
+            let bySource = relevantSourceRaws.contains(node.sourceSystem.rawValue)
+            let byPersona = node.personaIDs.contains(where: { personaIDs.contains($0) })
+            return bySource || byPersona
+        }
+        .sorted { $0.date > $1.date }
+        .prefix(5)
+
+        guard !relevant.isEmpty else { return "" }
+        return relevant
+            .map { "- \($0.title): \($0.summary)" }
+            .joined(separator: "\n")
+    }
+
+    /// Close the chat sheet and reset state.
+    @MainActor
+    func closeChat() {
+        isChatPresented = false
+        activeChatSession = nil
+        chatMessages = []
+        chatSelectedPersonaTypes = []
+        suggestedPersonas = []
+        chatError = nil
+        isChatLoading = false
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: - Single-Persona (1:1) Chat
+    // ─────────────────────────────────────────────
+
+    @MainActor
+    func openSinglePersonaChat(personaType: PersonaType) {
+        singleChatPersonaType = personaType
+        singleChatMessages = []
+        singleChatSession = nil
+        isSingleChatLoading = false
+        isSingleChatPresented = true
+    }
+
+    @MainActor
+    func sendSingleChatMessage(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isSingleChatLoading,
+              let pType = singleChatPersonaType else { return }
+
+        isSingleChatLoading = true
+
+        // Create session lazily on first message
+        if singleChatSession == nil {
+            let session = ChatSession(
+                title: String(trimmed.prefix(40)),
+                selectedPersonaTypeRaws: [pType.rawValue]
+            )
+            modelContext.insert(session)
+            singleChatSession = session
+            try? modelContext.save()
+        }
+
+        guard let session = singleChatSession else { return }
+
+        let userMsg = ChatMessage(role: ChatRole.user, content: trimmed)
+        userMsg.session = session
+        modelContext.insert(userMsg)
+        singleChatMessages.append(userMsg)
+        try? modelContext.save()
+
+        let history = singleChatMessages.suffix(6).map { msg -> String in
+            let prefix = msg.role == ChatRole.user
+                ? "사용자"
+                : (msg.personaType?.localizedName ?? pType.localizedName)
+            return "[\(prefix)] \(msg.content)"
+        }.joined(separator: "\n")
+
+        Task {
+            let dto = await generateResponse(for: pType, query: trimmed, history: history)
+            await MainActor.run {
+                if let dto {
+                    let msg = ChatMessage(
+                        role: ChatRole.persona,
+                        personaTypeRaw: dto.personaTypeRaw,
+                        content: dto.content
+                    )
+                    msg.session = session
+                    modelContext.insert(msg)
+                    singleChatMessages.append(msg)
+                }
+                isSingleChatLoading = false
+                try? modelContext.save()
+            }
+        }
+    }
+
+    @MainActor
+    func closeSingleChat() {
+        isSingleChatPresented = false
+        singleChatPersonaType = nil
+        singleChatSession = nil
+        singleChatMessages = []
+        isSingleChatLoading = false
+    }
+
+}
+
+// MARK: - NodeManagerAgent helpers
+
+extension GraphViewModel {
+    /// Kick off the NodeManagerAgent in the background.
+    /// Call after ecosystem sync or app foreground.
+    @MainActor
+    func runNodeManager() {
+        let ctx = modelContext
+        Task {
+            await NodeManagerAgent.shared.run(context: ctx, viewModel: self)
+        }
+    }
+
+    /// Runs scheduled daily analysis (≥08:00, once per calendar day).
+    /// Call on every scene foreground activation.
+    @MainActor
+    func runScheduledAnalysis() {
+        let ctx = modelContext
+        Task {
+            await NodeManagerAgent.shared.runScheduledAnalysisIfNeeded(context: ctx, viewModel: self)
+        }
+    }
 }
 
 // MARK: - Comparable clamping helper

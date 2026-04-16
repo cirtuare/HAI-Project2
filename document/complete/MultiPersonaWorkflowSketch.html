@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>다중 페르소나 AI 시스템 흐름도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #ffffff;
+    color: #1a1a18;
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1a18; color: #e8e6de; }
+  }
+
+  .root {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 32px 24px 48px;
+  }
+
+  .title-area {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 32px;
+  }
+  .title-area h2 {
+    font-size: 17px; font-weight: 500;
+    letter-spacing: -0.2px;
+  }
+  .title-area .sub {
+    font-size: 12px; color: #888780;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .sec-label {
+    font-size: 10px; font-weight: 500; letter-spacing: 0.9px;
+    text-transform: uppercase; color: #888780;
+    margin-bottom: 10px;
+  }
+
+  .data-layer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .data-group {
+    background: #f5f3ec;
+    border: 0.5px solid #d3d1c7;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .data-group { background: #2c2c2a; border-color: #444441; }
+  }
+  .data-group .dg-title {
+    font-size: 11px; font-weight: 500;
+    color: #5f5e5a;
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .data-group .dg-title { color: #b4b2a9; }
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot-gray   { background: #888780; }
+  .tag {
+    display: inline-flex; align-items: center;
+    font-size: 11px; color: #5f5e5a;
+    background: #ffffff;
+    border: 0.5px solid #d3d1c7;
+    border-radius: 5px;
+    padding: 2px 7px;
+    margin: 2px 2px 0 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    .tag { background: #1a1a18; color: #b4b2a9; border-color: #444441; }
+  }
+
+  .connector {
+    display: flex; align-items: center; justify-content: center;
+    padding: 4px 0;
+  }
+  .conn-line { width: 1px; background: #b4b2a9; height: 20px; flex-shrink: 0; }
+  .conn-arrow {
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #b4b2a9;
+  }
+
+  .llm-core {
+    border: 1px solid #b4b2a9;
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 8px;
+    background: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    .llm-core { background: #2c2c2a; border-color: #5f5e5a; }
+  }
+  .llm-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #e6f1fb;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    .llm-icon { background: #042c53; }
+  }
+  .llm-text .t1 { font-size: 13px; font-weight: 500; }
+  .llm-text .t2 { font-size: 11px; color: #5f5e5a; margin-top: 1px; }
+  @media (prefers-color-scheme: dark) {
+    .llm-text .t2 { color: #b4b2a9; }
+  }
+
+  .persona-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .persona-card {
+    border-radius: 10px;
+    padding: 11px 10px;
+    border: 0.5px solid transparent;
+    text-align: center;
+    transition: transform 0.15s;
+  }
+  .persona-card:hover { transform: translateY(-2px); }
+  .persona-card .p-icon { font-size: 20px; margin-bottom: 4px; }
+  .persona-card .p-name { font-size: 12px; font-weight: 500; display: block; }
+  .persona-card .p-sub { font-size: 10px; margin-top: 2px; display: block; opacity: 0.75; }
+
+  .pc-teal   { background:#E1F5EE; border-color:#5DCAA5; color:#085041; }
+  .pc-purple { background:#EEEDFE; border-color:#AFA9EC; color:#26215C; }
+  .pc-amber  { background:#FAEEDA; border-color:#FAC775; color:#412402; }
+  .pc-coral  { background:#FAECE7; border-color:#F0997B; color:#4A1B0C; }
+  @media (prefers-color-scheme: dark) {
+    .pc-teal   { background:#04342C; border-color:#1D9E75; color:#9FE1CB; }
+    .pc-purple { background:#26215C; border-color:#7F77DD; color:#CECBF6; }
+    .pc-amber  { background:#412402; border-color:#EF9F27; color:#FAC775; }
+    .pc-coral  { background:#4A1B0C; border-color:#D85A30; color:#F5C4B3; }
+  }
+
+  .blob-area { margin: 8px 0; display: flex; justify-content: center; }
+
+  .flow-section {
+    display: grid;
+    grid-template-columns: 1fr 200px;
+    gap: 12px;
+    align-items: start;
+  }
+  .main-flow { display: flex; flex-direction: column; }
+  .flow-step { display: flex; gap: 12px; align-items: flex-start; }
+  .flow-spine {
+    display: flex; flex-direction: column; align-items: center;
+    flex-shrink: 0; padding-top: 4px;
+  }
+  .step-num {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #f5f3ec;
+    border: 0.5px solid #b4b2a9;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 500; color: #5f5e5a;
+    font-family: 'DM Mono', monospace;
+    flex-shrink: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    .step-num { background: #2c2c2a; color: #b4b2a9; }
+  }
+  .spine-line {
+    width: 1px; flex: 1; min-height: 20px;
+    background: #d3d1c7;
+    margin: 3px 0;
+  }
+  .flow-body { padding: 6px 0 18px; flex: 1; }
+  .flow-body .fb-title { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+  .flow-body .fb-desc { font-size: 11px; color: #5f5e5a; line-height: 1.6; }
+  @media (prefers-color-scheme: dark) {
+    .flow-body .fb-desc { color: #b4b2a9; }
+  }
+  .flow-body .fb-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .fb-tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 0.5px solid;
+  }
+  .fbt-teal   { background:#E1F5EE; color:#085041; border-color:#5DCAA5; }
+  .fbt-amber  { background:#FAEEDA; color:#412402; border-color:#FAC775; }
+  .fbt-purple { background:#EEEDFE; color:#26215C; border-color:#AFA9EC; }
+  .fbt-coral  { background:#FAECE7; color:#4A1B0C; border-color:#D85A30; }
+  .fbt-gray   { background:#f5f3ec; color:#5f5e5a; border-color:#d3d1c7; }
+  @media (prefers-color-scheme: dark) {
+    .fbt-teal   { background:#04342C; color:#9FE1CB; border-color:#1D9E75; }
+    .fbt-amber  { background:#412402; color:#FAC775; border-color:#EF9F27; }
+    .fbt-purple { background:#26215C; color:#CECBF6; border-color:#7F77DD; }
+    .fbt-coral  { background:#4A1B0C; color:#F5C4B3; border-color:#D85A30; }
+    .fbt-gray   { background:#2c2c2a; color:#b4b2a9; border-color:#444441; }
+  }
+
+  .debate-vis {
+    margin-top: 8px;
+    background: #f5f3ec;
+    border-radius: 10px;
+    padding: 10px 12px;
+    border: 0.5px solid #d3d1c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    .debate-vis { background: #2c2c2a; border-color: #444441; }
+  }
+  .debate-vis .dv-label {
+    font-size: 10px; color: #888780;
+    margin-bottom: 8px; font-weight: 500; letter-spacing: 0.5px;
+  }
+  .bubble-row { display: flex; flex-direction: column; gap: 6px; }
+  .bubble { display: flex; gap: 8px; align-items: flex-start; }
+  .bubble.right { flex-direction: row-reverse; }
+  .b-avatar {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: 500; flex-shrink: 0;
+  }
+  .av-amber { background:#FAEEDA; color:#633806; }
+  .av-teal  { background:#E1F5EE; color:#04342C; }
+  @media (prefers-color-scheme: dark) {
+    .av-amber { background:#412402; color:#FAC775; }
+    .av-teal  { background:#04342C; color:#9FE1CB; }
+  }
+  .b-text {
+    font-size: 10px; line-height: 1.5;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 0.5px solid #d3d1c7;
+    background: #ffffff;
+    max-width: 220px;
+    color: #5f5e5a;
+  }
+  @media (prefers-color-scheme: dark) {
+    .b-text { background: #1a1a18; border-color: #444441; color: #b4b2a9; }
+  }
+
+  .result-box {
+    background: #eaf3de;
+    border: 0.5px solid #97c459;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 4px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .result-box { background: #173404; border-color: #639922; }
+  }
+  .result-box .rb-title { font-size: 12px; font-weight: 500; color: #3b6d11; margin-bottom: 4px; }
+  @media (prefers-color-scheme: dark) {
+    .result-box .rb-title { color: #97c459; }
+  }
+  .result-box .rb-desc { font-size: 11px; color: #5f5e5a; line-height: 1.5; }
+  @media (prefers-color-scheme: dark) {
+    .result-box .rb-desc { color: #b4b2a9; }
+  }
+
+  .side-panel {
+    background: #f5f3ec;
+    border: 0.5px solid #d3d1c7;
+    border-radius: 12px;
+    padding: 14px;
+    align-self: start;
+  }
+  @media (prefers-color-scheme: dark) {
+    .side-panel { background: #2c2c2a; border-color: #444441; }
+  }
+  .side-panel .sp-title {
+    font-size: 11px; font-weight: 500;
+    color: #5f5e5a;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .side-panel .sp-title { color: #b4b2a9; }
+  }
+  .trigger-badge {
+    display: inline-block;
+    font-size: 9px; padding: 2px 6px;
+    background: #faeeda;
+    color: #854f0b;
+    border-radius: 4px; border: 0.5px solid #fac775;
+    font-weight: 500; letter-spacing: 0.3px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .trigger-badge { background: #412402; color: #fac775; border-color: #ef9f27; }
+  }
+  .side-step { display: flex; gap: 8px; margin-bottom: 10px; align-items: flex-start; }
+  .ss-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #b4b2a9;
+    margin-top: 5px; flex-shrink: 0;
+  }
+  .ss-text { font-size: 11px; color: #5f5e5a; line-height: 1.5; }
+  .ss-text strong { color: #1a1a18; font-weight: 500; }
+  @media (prefers-color-scheme: dark) {
+    .ss-text { color: #b4b2a9; }
+    .ss-text strong { color: #e8e6de; }
+  }
+  .view-card {
+    font-size: 10px; padding: 5px 8px;
+    border: 0.5px solid #d3d1c7;
+    border-radius: 6px; color: #5f5e5a;
+    margin-bottom: 5px;
+  }
+  .view-card strong { display: block; color: #1a1a18; font-weight: 500; }
+  @media (prefers-color-scheme: dark) {
+    .view-card { border-color: #444441; color: #b4b2a9; background: #1a1a18; }
+    .view-card strong { color: #e8e6de; }
+  }
+  .divider { border: none; border-top: 0.5px solid #d3d1c7; margin: 10px 0; }
+  @media (prefers-color-scheme: dark) {
+    .divider { border-color: #444441; }
+  }
+  .filter-label { font-size: 10px; color: #5f5e5a; line-height: 1.8; }
+  .filter-label strong { display: block; color: #5f5e5a; font-weight: 500; margin-bottom: 2px; }
+  .fi { display: flex; align-items: center; gap: 5px; }
+  .dot-teal   { background: #1D9E75; }
+  .dot-purple { background: #7F77DD; }
+  .dot-amber  { background: #EF9F27; }
+  .dot-coral  { background: #D85A30; }
+</style>
+</head>
+<body>
+<div class="root">
+  <div class="title-area">
+    <h2>다중 페르소나 AI 시스템</h2>
+    <span class="sub">system flow v1.0</span>
+  </div>
+
+  <!-- ① DATA SOURCES -->
+  <div class="sec-label">① 데이터 소스 (로컬 파싱 + 사용자 입력)</div>
+  <div class="data-layer">
+    <div class="data-group">
+      <div class="dg-title"><span class="dot dot-gray"></span>로컬 데이터 파싱</div>
+      <span class="tag">Apple 건강</span>
+      <span class="tag">걸음수 / 수면</span>
+      <span class="tag">스크린타임</span>
+      <span class="tag">Apple Pay</span>
+      <span class="tag">캘린더</span>
+      <span class="tag">메모</span>
+      <span class="tag">미리알림</span>
+    </div>
+    <div class="data-group">
+      <div class="dg-title"><span class="dot dot-gray"></span>사용자 직접 입력</div>
+      <span class="tag">음성</span>
+      <span class="tag">텍스트 (PDF, txt…)</span>
+      <span class="tag">이미지</span>
+      <span class="tag">문서 업로드</span>
+    </div>
+  </div>
+
+  <!-- connector -->
+  <div class="connector">
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <div class="conn-line" style="height:16px"></div>
+      <div class="conn-arrow"></div>
+    </div>
+  </div>
+
+  <!-- ② LLM CORE -->
+  <div class="sec-label">② LLM 분석 엔진</div>
+  <div class="llm-core">
+    <div class="llm-icon">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="7" stroke="#185FA5" stroke-width="1.2"/>
+        <circle cx="10" cy="10" r="3" fill="#e6f1fb" stroke="#185FA5" stroke-width="1"/>
+        <line x1="10" y1="3" x2="10" y2="1" stroke="#185FA5" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="10" y1="17" x2="10" y2="19" stroke="#185FA5" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="3" y1="10" x2="1" y2="10" stroke="#185FA5" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="17" y1="10" x2="19" y2="10" stroke="#185FA5" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="llm-text">
+      <div class="t1">컨텍스트 파싱 &amp; 페르소나 분화</div>
+      <div class="t2">로컬 데이터 노드 임계값 도달 시 자동 분화 · 수동 추가 가능 · 라우터 에이전트가 총괄</div>
+    </div>
+  </div>
+
+  <!-- connector -->
+  <div class="connector">
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <div class="conn-line" style="height:16px"></div>
+      <div class="conn-arrow"></div>
+    </div>
+  </div>
+
+  <!-- ③ PERSONAS -->
+  <div class="sec-label">③ 페르소나 에이전트 (AI Agent 1개 = 1개의 페르소나)</div>
+  <div class="persona-row">
+    <div class="persona-card pc-teal">
+      <div class="p-icon">🏃</div>
+      <span class="p-name">건강</span>
+      <span class="p-sub">Apple Health · 스크린타임</span>
+    </div>
+    <div class="persona-card pc-purple">
+      <div class="p-icon">📚</div>
+      <span class="p-name">학업</span>
+      <span class="p-sub">메모 · 캘린더 · 미리알림</span>
+    </div>
+    <div class="persona-card pc-amber">
+      <div class="p-icon">💰</div>
+      <span class="p-name">금융</span>
+      <span class="p-sub">Apple Pay · 예산 내역</span>
+    </div>
+    <div class="persona-card pc-coral">
+      <div class="p-icon">🎨</div>
+      <span class="p-name">취미</span>
+      <span class="p-sub">사진 메타데이터 · 메모</span>
+    </div>
+  </div>
+
+  <!-- blob viz -->
+  <div class="blob-area">
+    <svg width="340" height="90" viewBox="0 0 340 90">
+      <text x="8" y="13" font-size="9" fill="#888780" font-family="DM Mono, monospace">시각화</text>
+      <ellipse cx="80" cy="50" rx="34" ry="24" fill="#E1F5EE" stroke="#5DCAA5" stroke-width="0.8" opacity="0.9"/>
+      <ellipse cx="140" cy="48" rx="26" ry="20" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="0.8" opacity="0.9"/>
+      <ellipse cx="200" cy="52" rx="30" ry="22" fill="#FAEEDA" stroke="#FAC775" stroke-width="0.8" opacity="0.9"/>
+      <ellipse cx="262" cy="49" rx="28" ry="21" fill="#FAECE7" stroke="#F0997B" stroke-width="0.8" opacity="0.9"/>
+      <text x="80"  y="53" text-anchor="middle" font-size="9" font-weight="500" fill="#085041" font-family="DM Sans, sans-serif">건강</text>
+      <text x="140" y="51" text-anchor="middle" font-size="9" font-weight="500" fill="#26215C" font-family="DM Sans, sans-serif">학업</text>
+      <text x="200" y="55" text-anchor="middle" font-size="9" font-weight="500" fill="#412402" font-family="DM Sans, sans-serif">금융</text>
+      <text x="262" y="52" text-anchor="middle" font-size="9" font-weight="500" fill="#4A1B0C" font-family="DM Sans, sans-serif">취미</text>
+      <line x1="113" y1="50" x2="115" y2="50" stroke="#888780" stroke-width="0.6" stroke-dasharray="2 2"/>
+      <line x1="165" y1="50" x2="171" y2="51" stroke="#888780" stroke-width="0.6" stroke-dasharray="2 2"/>
+      <line x1="229" y1="50" x2="235" y2="50" stroke="#888780" stroke-width="0.6" stroke-dasharray="2 2"/>
+      <text x="170" y="83" text-anchor="middle" font-size="9" fill="#888780" font-family="DM Sans, sans-serif">← 페르소나 간 텐션(Tension) 의도적 허용 →</text>
+    </svg>
+  </div>
+
+  <!-- ④ FLOW + SIDE PANEL -->
+  <div class="sec-label">④ 사용자 상호작용 흐름</div>
+  <div class="flow-section">
+    <div class="main-flow">
+
+      <!-- A -->
+      <div class="flow-step">
+        <div class="flow-spine">
+          <div class="step-num">A</div>
+          <div class="spine-line"></div>
+        </div>
+        <div class="flow-body">
+          <div class="fb-title">사용자가 사용할 페르소나 지정</div>
+          <div class="fb-desc">Chat 진입 전, 고민과 관련된 페르소나를 선택하거나 전체를 열어둠</div>
+          <div class="fb-tags">
+            <span class="fb-tag fbt-amber">금융</span>
+            <span class="fb-tag fbt-coral">취미</span>
+            <span class="fb-tag fbt-gray">+ 수동 추가 가능</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- B -->
+      <div class="flow-step">
+        <div class="flow-spine">
+          <div class="step-num">B</div>
+          <div class="spine-line"></div>
+        </div>
+        <div class="flow-body">
+          <div class="fb-title">Chat 형식으로 고민 던져줌 (with Context)</div>
+          <div class="fb-desc">사용자가 자연어로 고민을 입력 → 로컬 데이터 컨텍스트와 함께 관련 페르소나들에게 전달</div>
+          <div class="fb-tags">
+            <span class="fb-tag fbt-gray" style="font-family:'DM Mono',monospace">"이번 주 제주도 항공권 살까?"</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- C -->
+      <div class="flow-step">
+        <div class="flow-spine">
+          <div class="step-num">C</div>
+          <div class="spine-line"></div>
+        </div>
+        <div class="flow-body">
+          <div class="fb-title">관련된 페르소나끼리 토론 진행</div>
+          <div class="fb-desc">서로 다른 목표를 가진 페르소나들이 의견 충돌, 사용자는 제3자로 관찰</div>
+          <div class="debate-vis">
+            <div class="dv-label">LIVE DEBATE</div>
+            <div class="bubble-row">
+              <div class="bubble">
+                <div class="b-avatar av-amber">💰</div>
+                <div class="b-text">이번 달 예산 이미 초과. 항공권은 다음 달로 미뤄야 해.</div>
+              </div>
+              <div class="bubble right">
+                <div class="b-avatar av-teal">🎨</div>
+                <div class="b-text">메모에 적어뒀던 여행 아이디어잖아. 지금 아니면 또 미뤄.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- D -->
+      <div class="flow-step">
+        <div class="flow-spine">
+          <div class="step-num">D</div>
+          <div class="spine-line"></div>
+        </div>
+        <div class="flow-body">
+          <div class="fb-title">토의/론 결과 사용자 공유</div>
+          <div class="fb-desc">각 페르소나의 논거 요약 + 최종 제안(결론이 아닌 선택지)을 사용자에게 제시</div>
+          <div class="result-box">
+            <div class="rb-title">결과 요약 예시</div>
+            <div class="rb-desc">금융: 예산 -18만원 초과 · 취미: 잔여 연차 2일 확인됨<br>→ "다음 주 얼리버드 노려보는 건 어때?"</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- E -->
+      <div class="flow-step">
+        <div class="flow-spine">
+          <div class="step-num">E</div>
+        </div>
+        <div class="flow-body">
+          <div class="fb-title">이후 사용자와 대화 가능 (특성 페르소나로)</div>
+          <div class="fb-desc">원하는 페르소나 하나를 선택해 1:1 대화 전환 — 해당 도메인 데이터 컨텍스트 유지</div>
+          <div class="fb-tags">
+            <span class="fb-tag fbt-amber">금융 페르소나와 계속 →</span>
+            <span class="fb-tag fbt-coral">취미 페르소나와 계속 →</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main-flow -->
+
+    <!-- SIDE PANEL -->
+    <div class="side-panel">
+      <div class="sp-title">
+        자율 토론 모드
+        <span class="trigger-badge">trigger</span>
+      </div>
+
+      <div class="side-step">
+        <div class="ss-dot"></div>
+        <div class="ss-text"><strong>특정 조건 감지</strong><br>데이터 노드 임계값 · 스케줄 · 이상 패턴</div>
+      </div>
+      <div class="side-step">
+        <div class="ss-dot"></div>
+        <div class="ss-text"><strong>페르소나끼리 자발적 토의</strong><br>사용자 trigger 없이 백그라운드 실행</div>
+      </div>
+      <div class="side-step">
+        <div class="ss-dot"></div>
+        <div class="ss-text"><strong>결과 노티피케이션</strong><br>요약 알림으로 사용자에게 전달</div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="sp-title" style="margin-bottom:8px">뷰 모드</div>
+      <div class="view-card"><strong>Context View</strong>전체 맥락 타임라인</div>
+      <div class="view-card"><strong>Origin View</strong>데이터 출처 추적</div>
+      <div class="view-card"><strong>Timeline View</strong>시계열 페르소나 변화</div>
+
+      <hr class="divider">
+
+      <div class="filter-label">
+        <strong>Filter</strong>
+        <div class="fi"><span class="dot dot-teal" style="width:6px;height:6px;border-radius:50%;display:inline-block"></span> 건강</div>
+        <div class="fi"><span class="dot dot-purple" style="width:6px;height:6px;border-radius:50%;display:inline-block"></span> 학업</div>
+        <div class="fi"><span class="dot dot-amber" style="width:6px;height:6px;border-radius:50%;display:inline-block"></span> 금융</div>
+        <div class="fi"><span class="dot dot-coral" style="width:6px;height:6px;border-radius:50%;display:inline-block"></span> 취미</div>
+      </div>
+    </div>
+
+  </div><!-- /flow-section -->
+</div>
+</body>
+</html>

@@ -86,17 +86,30 @@ struct DebateResultPanel: View {
         return parseSynthesis(json)
     }
 
+    // Analysis turns from each specialist (role == "analysis")
+    private var analysisTurns: [AgentTurn] {
+        vm.activeDebateTranscript.filter { $0.role == "analysis" }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider().background(Color.white.opacity(0.08))
-            if let s = synthesis {
-                content(s)
-            } else {
-                rawFallback
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !analysisTurns.isEmpty {
+                        agentPositionsSection
+                        Divider().background(Color.white.opacity(0.08)).padding(.vertical, 2)
+                    }
+                    if let s = synthesis {
+                        content(s)
+                    } else {
+                        rawFallback
+                    }
+                }
             }
         }
-        .frame(width: 300)
+        .frame(width: 320)
         .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -104,6 +117,89 @@ struct DebateResultPanel: View {
                 .strokeBorder(Color(hex: "#f97316").opacity(0.35), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.5), radius: 24, y: 8)
+    }
+
+    // MARK: Agent Positions
+
+    private var agentPositionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("각 에이전트 입장", systemImage: "person.2.wave.2")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color(hex: "#f97316"))
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+
+            ForEach(Array(analysisTurns.enumerated()), id: \.offset) { _, turn in
+                agentPositionCard(turn)
+            }
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func agentPositionCard(_ turn: AgentTurn) -> some View {
+        let accent = domainAccent(turn.domain)
+        let preview = String(turn.content.prefix(120)) + (turn.content.count > 120 ? "…" : "")
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: domainIcon(turn.domain))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text(domainName(turn.domain))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(accent)
+                Spacer()
+                Text("\(Int(turn.confidence * 100))%")
+                    .font(.system(size: 9))
+                    .foregroundStyle(accent.opacity(0.7))
+            }
+            Text(preview)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.65))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(accent.opacity(0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(accent.opacity(0.2), lineWidth: 0.5)
+                )
+        )
+        .padding(.horizontal, 14)
+    }
+
+    private func domainAccent(_ domain: String) -> Color {
+        switch domain {
+        case "health":   return Color(hex: "#1D9E75")
+        case "academic": return Color(hex: "#7F77DD")
+        case "finance":  return Color(hex: "#EF9F27")
+        case "hobby":    return Color(hex: "#D85A30")
+        default:         return Color(hex: "#64748b")
+        }
+    }
+
+    private func domainName(_ domain: String) -> String {
+        switch domain {
+        case "health":      return "건강"
+        case "work":        return "업무"
+        case "academic":    return "학업"
+        case "finance":     return "금융"
+        case "hobby":       return "취미"
+        case "synthesizer": return "종합"
+        default:            return domain
+        }
+    }
+
+    private func domainIcon(_ domain: String) -> String {
+        switch domain {
+        case "health":   return "heart.fill"
+        case "work":     return "briefcase.fill"
+        case "academic": return "book.fill"
+        case "finance":  return "dollarsign.circle.fill"
+        case "hobby":    return "star.fill"
+        default:         return "circle.fill"
+        }
     }
 
     // MARK: Header
@@ -171,6 +267,44 @@ struct DebateResultPanel: View {
             // Urgency badge
             urgencyBadge(s.urgency)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Divider().background(Color.white.opacity(0.08))
+
+            // Continue chat buttons — one per active persona
+            VStack(spacing: 6) {
+                ForEach(vm.personas.prefix(3)) { persona in
+                    if let pType = persona.personaType {
+                        Button {
+                            onDismiss()
+                            vm.openSinglePersonaChat(personaType: pType)
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: pType.icon)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Color(hex: pType.accentHex))
+                                Text("\(pType.localizedName) 페르소나와 계속 대화")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.white.opacity(0.75))
+                                Spacer()
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(Color.white.opacity(0.35))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color(hex: pType.accentHex).opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .strokeBorder(Color(hex: pType.accentHex).opacity(0.2), lineWidth: 0.5)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .padding(14)
     }
@@ -225,6 +359,81 @@ private struct DebateSynthesisDisplay: Decodable {
     let rootCause: String
     let actions: [String]
     let urgency: String
+}
+
+// MARK: - PersonaSuggestionBanner
+
+/// Shown when NodeManagerAgent detects ≥10 nodes belonging to a PersonaType
+/// that the user hasn't created yet.
+struct PersonaSuggestionBanner: View {
+    @Environment(GraphViewModel.self) private var vm
+    let onAccept: (PersonaType) -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        if let suggested = vm.pendingPersonaSuggestion {
+            HStack(spacing: 10) {
+                // Persona color dot
+                Circle()
+                    .fill(Color(hex: suggested.accentHex))
+                    .frame(width: 8, height: 8)
+
+                Image(systemName: suggested.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(hex: suggested.accentHex))
+
+                Text("\(suggested.localizedName) 페르소나를 만들어볼까요?")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+
+                Spacer(minLength: 0)
+
+                // Accept button
+                Button {
+                    onAccept(suggested)
+                } label: {
+                    Text("만들기")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(Color(hex: suggested.accentHex))
+                        )
+                }
+                .buttonStyle(.plain)
+
+                // Dismiss button
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .padding(5)
+                        .background(Circle().fill(Color.white.opacity(0.07)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(suggestionBackground(accent: Color(hex: suggested.accentHex)))
+            .shadow(color: Color(hex: suggested.accentHex).opacity(0.25), radius: 12)
+        }
+    }
+
+    private func suggestionBackground(accent: Color) -> some View {
+        ZStack {
+            Capsule(style: .continuous)
+                .fill(Color(red: 0.07, green: 0.08, blue: 0.12).opacity(0.96))
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [accent.opacity(0.6), accent.opacity(0.2)],
+                        startPoint: .leading, endPoint: .trailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+    }
 }
 
 // MARK: - Preview

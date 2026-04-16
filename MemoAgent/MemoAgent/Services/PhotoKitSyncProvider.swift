@@ -36,41 +36,86 @@ final class PhotoKitSyncProvider {
     // MARK: - Fetch metadata (no image data)
 
     /// Fetch recent photo metadata and return GraphNode drafts.
-    /// Limit is intentionally small — Photos are expensive.
+    /// For the `.hobby` persona: higher limit, location/time metadata emphasised.
     func fetchRecentPhotoNodes(for persona: PersonaRecord, limit: Int = 40) -> [GraphNode] {
         guard authorizationStatus == .authorized || authorizationStatus == .limited else { return [] }
 
+        let isHobby = persona.personaType == .hobby
+        let effectiveLimit = isHobby ? max(limit, 60) : limit
+
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.fetchLimit = limit
+        options.fetchLimit = effectiveLimit
+        // Hobby persona: include all media, not just recent photos
+        if !isHobby {
+            // Non-hobby: skip screenshots to reduce noise
+            options.predicate = NSPredicate(
+                format: "NOT (mediaSubtype & %d != 0)",
+                PHAssetMediaSubtype.photoScreenshot.rawValue
+            )
+        }
 
         let assets = PHAsset.fetchAssets(with: .image, options: options)
         let formatter = ISO8601DateFormatter()
         var nodes: [GraphNode] = []
 
-        assets.enumerateObjects { asset, _, _ in
+        assets.enumerateObjects { [self] asset, _, _ in
             let dateStr = asset.creationDate.map { formatter.string(from: $0).prefix(10).description }
                 ?? formatter.string(from: Date()).prefix(10).description
-            let location = asset.location.map { "\(String(format: "%.4f", $0.coordinate.latitude)), \(String(format: "%.4f", $0.coordinate.longitude))" }
+            let location = asset.location.map {
+                "\(String(format: "%.4f", $0.coordinate.latitude)), \(String(format: "%.4f", $0.coordinate.longitude))"
+            }
+
+            // Hobby: richer summary with location + time of day
+            let summary: String
+            if isHobby {
+                var parts: [String] = []
+                if let loc = location { parts.append("📍 \(loc)") }
+                if let created = asset.creationDate {
+                    let hour = Calendar.current.component(.hour, from: created)
+                    parts.append(timeOfDayLabel(hour: hour))
+                }
+                if asset.isFavorite { parts.append("⭐ 즐겨찾기") }
+                summary = parts.joined(separator: " · ").nilIfEmpty ?? "사진 기록"
+            } else {
+                summary = [location.map { "📍 \($0)" }, asset.isFavorite ? "⭐ 즐겨찾기" : nil]
+                    .compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "사진 기록"
+            }
+
+            let isScreenshot = asset.mediaSubtypes.contains(.photoScreenshot)
+            var tags = ["사진"]
+            if isScreenshot { tags.append("스크린샷") }
+            if location != nil && isHobby { tags.append("위치기록") }
+            if asset.isFavorite { tags.append("즐겨찾기") }
 
             let node = GraphNode(
                 id: UUID().uuidString,
-                title: "사진 \(dateStr)",
-                summary: [location.map { "📍 \($0)" }, asset.isFavorite ? "⭐ 즐겨찾기" : nil]
-                    .compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "사진 기록",
+                title: isHobby ? "사진 \(dateStr)\(location != nil ? " (위치 있음)" : "")" : "사진 \(dateStr)",
+                summary: summary,
                 type: .photo,
                 date: dateStr,
                 originalText: "Photo: \(asset.localIdentifier) | \(dateStr) | location: \(location ?? "none") | favorite: \(asset.isFavorite)",
                 isImportant: asset.isFavorite,
-                tags: ["사진", asset.mediaSubtypes.contains(.photoScreenshot) ? "스크린샷" : "사진"].filter { !$0.isEmpty },
+                tags: tags,
                 position: CGPoint(x: Double.random(in: -600...600), y: Double.random(in: -400...400)),
                 sourceSystem: .photos,
                 externalID: asset.localIdentifier,
-                personaID: persona.id
+                personaIDs: [persona.id]
             )
             nodes.append(node)
         }
         return nodes
+    }
+
+    private func timeOfDayLabel(hour: Int) -> String {
+        switch hour {
+        case 5..<9:   return "🌅 아침"
+        case 9..<12:  return "☀️ 오전"
+        case 12..<14: return "🌞 점심"
+        case 14..<18: return "🌤 오후"
+        case 18..<21: return "🌇 저녁"
+        default:       return "🌙 밤"
+        }
     }
 
     // MARK: - Thumbnail (on-demand, cached, never persisted)

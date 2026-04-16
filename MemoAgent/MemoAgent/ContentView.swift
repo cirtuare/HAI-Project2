@@ -58,6 +58,30 @@ struct ContentView: View {
         )) {
             SettingsView()
         }
+        // Multi-Persona Chat sheet
+        .sheet(isPresented: Binding(
+            get: { vm.isChatPresented },
+            set: { if !$0 { vm.closeChat() } }
+        )) {
+            MultiPersonaChatView()
+                .environment(vm)
+        }
+        // Single-Persona Chat sheet
+        .sheet(isPresented: Binding(
+            get: { vm.isSingleChatPresented },
+            set: { if !$0 { vm.closeSingleChat() } }
+        )) {
+            SinglePersonaChatView()
+                .environment(vm)
+        }
+        // Live Debate visualization sheet
+        .sheet(isPresented: Binding(
+            get: { vm.isLiveDebatePresented },
+            set: { vm.isLiveDebatePresented = $0 }
+        )) {
+            LiveDebateView()
+                .environment(vm)
+        }
         // Debate result panel — slides in from bottom-right when synthesis completes
         .overlay(alignment: .bottomTrailing) {
             if vm.activeDebateResult != nil {

@@ -21,7 +21,8 @@ final class NodeRecord {
     // V2 additions
     var sourceSystemRaw: String
     var externalID: String?    // PHAsset.localIdentifier, EKEvent.eventIdentifier, etc.
-    var personaID: String?     // nil = visible to all personas
+    var personaID: String?     // Legacy V2 field — kept for schema compat; use personaIDs going forward
+    var personaIDs: [String]   // V3: multi-persona support (empty = visible to all)
     var schemaVersion: Int     // 1 = migrated from V1, 2 = native V2
     var isProcessed: Bool      // false = pending NodeManagerAgent analysis
     var createdAt: Date
@@ -39,6 +40,7 @@ final class NodeRecord {
          sourceSystemRaw: String = SourceSystem.userCreated.rawValue,
          externalID: String? = nil,
          personaID: String? = nil,
+         personaIDs: [String] = [],
          schemaVersion: Int = 2,
          isProcessed: Bool = true,
          createdAt: Date = Date()) {
@@ -55,6 +57,7 @@ final class NodeRecord {
         self.sourceSystemRaw = sourceSystemRaw
         self.externalID = externalID
         self.personaID = personaID
+        self.personaIDs = personaIDs.isEmpty && personaID != nil ? [personaID!] : personaIDs
         self.schemaVersion = schemaVersion
         self.isProcessed = isProcessed
         self.createdAt = createdAt
@@ -63,7 +66,11 @@ final class NodeRecord {
     // MARK: - Conversion
 
     func toGraphNode() -> GraphNode {
-        GraphNode(
+        // Merge legacy personaID into personaIDs for backward compat
+        let effectiveIDs: [String] = personaIDs.isEmpty && personaID != nil
+            ? [personaID!]
+            : personaIDs
+        return GraphNode(
             id: id,
             title: title,
             summary: summary,
@@ -75,7 +82,7 @@ final class NodeRecord {
             position: CGPoint(x: positionX, y: positionY),
             sourceSystem: SourceSystem(rawValue: sourceSystemRaw) ?? .userCreated,
             externalID: externalID,
-            personaID: personaID
+            personaIDs: effectiveIDs
         )
     }
 
@@ -91,7 +98,8 @@ final class NodeRecord {
         positionY      = node.position.y
         sourceSystemRaw = node.sourceSystem.rawValue
         externalID     = node.externalID
-        personaID      = node.personaID
+        personaIDs     = node.personaIDs
+        personaID      = nil  // phase out legacy field
     }
 
     static func from(_ node: GraphNode, schemaVersion: Int = 2) -> NodeRecord {
@@ -108,7 +116,7 @@ final class NodeRecord {
             positionY: node.position.y,
             sourceSystemRaw: node.sourceSystem.rawValue,
             externalID: node.externalID,
-            personaID: node.personaID,
+            personaIDs: node.personaIDs,
             schemaVersion: schemaVersion
         )
     }

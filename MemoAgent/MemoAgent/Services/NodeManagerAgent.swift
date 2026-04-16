@@ -17,8 +17,9 @@ actor NodeManagerAgent {
     static let shared = NodeManagerAgent()
     private init() {}
 
-    private let lastRunKey     = "nodemind.nodemanager.lastrun"
-    private let lastPatternKey = "nodemind.nodemanager.lastpattern"
+    private let lastRunKey       = "nodemind.nodemanager.lastrun"
+    private let lastPatternKey   = "nodemind.nodemanager.lastpattern"
+    private let lastScheduledKey = "nodemind.nodemanager.lastscheduled"
 
     // MARK: - Entry Point
 
@@ -39,8 +40,82 @@ actor NodeManagerAgent {
 
         await MainActor.run { viewModel.refreshFromSwiftData() }
 
+        // Persona threshold check: suggest new personas if node density warrants it
+        await checkPersonaThresholds(context: context, viewModel: viewModel)
+
         // Cross-domain pattern detection — throttled separately (once per day)
         await runPatternDetectionIfNeeded(context: context, viewModel: viewModel)
+    }
+
+    // MARK: - Scheduled Analysis (6-3: 매일 오전 8시, 주간 인사이트)
+
+    /// Called on every app foreground. Runs full analysis once per calendar day
+    /// after 08:00, and generates a weekly insight node on Sundays.
+    func runScheduledAnalysisIfNeeded(context: ModelContext, viewModel: GraphViewModel) async {
+        let calendar = Calendar.current
+        let now      = Date()
+        let hour     = calendar.component(.hour, from: now)
+
+        // Only run at 08:00 or later
+        guard hour >= 8 else { return }
+
+        // Skip if already ran today
+        if let lastRun = UserDefaults.standard.object(forKey: lastScheduledKey) as? Date,
+           calendar.isDateInToday(lastRun) { return }
+
+        UserDefaults.standard.set(now, forKey: lastScheduledKey)
+
+        // Full node-manager pass
+        await run(context: context, viewModel: viewModel)
+
+        // Weekly insight on Sundays (weekday == 1 in Calendar.current)
+        let weekday = calendar.component(.weekday, from: now)
+        if weekday == 1 {
+            await generateWeeklyInsightNode(context: context, viewModel: viewModel)
+        }
+    }
+
+    /// Generates a summary node covering the past 7 days' activity across all domains.
+    private func generateWeeklyInsightNode(context: ModelContext, viewModel: GraphViewModel) async {
+        let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let allNodes     = (try? context.fetch(FetchDescriptor<NodeRecord>())) ?? []
+        let recent       = allNodes.filter { $0.createdAt >= sevenDaysAgo && !$0.isProcessed == false }
+        guard recent.count >= 3 else { return }
+
+        // Domain breakdown
+        let bySource = Dictionary(grouping: recent) { $0.sourceSystemRaw }
+        let breakdown = bySource
+            .sorted { $0.value.count > $1.value.count }
+            .prefix(4)
+            .map { pair -> String in
+                let label = SourceSystem(rawValue: pair.key)?.localizedLabel ?? pair.key
+                return "\(label) \(pair.value.count)개"
+            }
+            .joined(separator: ", ")
+
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let today = String(format: "%04d-%02d-%02d",
+                           comps.year ?? 0, comps.month ?? 0, comps.day ?? 0)
+
+        let insightNode = NodeRecord(
+            title: "주간 인사이트 · \(today)",
+            summary: "지난 7일간 \(recent.count)개의 지식 블록이 생성됐습니다. [\(breakdown)]",
+            nodeTypeRaw: NodeType.aiCluster.rawValue,
+            date: today,
+            originalText: "자동 생성 주간 요약 — \(breakdown)",
+            isImportant: true,
+            tags: ["주간 인사이트", "자동 분석"],
+            positionX: Double.random(in: -180...180),
+            positionY: Double.random(in: -180...180),
+            sourceSystemRaw: SourceSystem.aiGenerated.rawValue,
+            personaIDs: [fetchActivePersonaID(context: context)].compactMap { $0 },
+            isProcessed: true
+        )
+        context.insert(insightNode)
+        try? context.save()
+
+        await NotificationService.shared.sendWeeklyInsightNotification(nodeCount: recent.count)
+        await MainActor.run { viewModel.refreshFromSwiftData() }
     }
 
     // MARK: - Cross-Domain Pattern Detection
@@ -54,85 +129,184 @@ actor NodeManagerAgent {
         if let last = UserDefaults.standard.object(forKey: lastPatternKey) as? Date,
            Date().timeIntervalSince(last) < 86400 { return }
 
-        guard let trigger = detectCrossDomainPattern(context: context) else { return }
+        guard let trigger = detectBestCrossDomainPattern(context: context) else { return }
         UserDefaults.standard.set(Date(), forKey: lastPatternKey)
         await DebateOrchestrator.shared.startDebate(trigger: trigger, context: context, viewModel: viewModel)
     }
 
-    private func detectCrossDomainPattern(context: ModelContext) -> DebateTrigger? {
-        let healthNodes   = fetchNodes(ofType: .healthMetric,  context: context)
-        let reminderNodes = fetchNodes(ofType: .reminder,      context: context)
-        let calendarNodes = fetchNodes(ofType: .calendarEvent, context: context)
-
-        // Need data from both health and work domains to debate
-        guard !healthNodes.isEmpty, !reminderNodes.isEmpty else { return nil }
-
+    /// Evaluates all supported cross-domain pattern pairs and returns
+    /// the highest-urgency trigger, or nil if no pair meets the threshold.
+    private func detectBestCrossDomainPattern(context: ModelContext) -> DebateTrigger? {
         let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-        let recentHealth   = healthNodes.filter   { isWithin(date: $0.date, since: sevenDaysAgo) }
-        let recentReminder = reminderNodes.filter { isWithin(date: $0.date, since: sevenDaysAgo) }
-        let recentCalendar = calendarNodes.filter { isWithin(date: $0.date, since: sevenDaysAgo) }
 
-        guard !recentHealth.isEmpty else { return nil }
+        // ── Fetch nodes by domain ──────────────────────────────────────────
+        let healthNodes   = fetchNodes(ofType: .healthMetric,  context: context)
+            .filter { isWithin(date: $0.date, since: sevenDaysAgo) }
+        let reminderNodes = fetchNodes(ofType: .reminder,      context: context)
+            .filter { isWithin(date: $0.date, since: sevenDaysAgo) }
+        let calendarNodes = fetchNodes(ofType: .calendarEvent, context: context)
+            .filter { isWithin(date: $0.date, since: sevenDaysAgo) }
+        let financeNodes  = fetchNodesBySource(.finance,  context: context)
+            .filter { isWithin(date: $0.date, since: sevenDaysAgo) }
+        let photoNodes    = fetchNodesBySource(.photos,   context: context)
+            .filter { isWithin(date: $0.date, since: sevenDaysAgo) }
+        let workNodes     = reminderNodes + calendarNodes
 
-        var urgencyScore = 0.0
+        // ── Evaluate each domain pair ──────────────────────────────────────
+        let candidates: [DebateTrigger?] = [
+            evaluateHealthWork(health: healthNodes, work: workNodes,
+                               all: healthNodes + workNodes,
+                               personaID: fetchActivePersonaID(context: context)),
+            evaluateHealthFinance(health: healthNodes, finance: financeNodes,
+                                  personaID: fetchActivePersonaID(context: context)),
+            evaluateFinanceHobby(finance: financeNodes, hobby: photoNodes,
+                                 personaID: fetchActivePersonaID(context: context)),
+            evaluateAcademicHealth(academic: workNodes, health: healthNodes,
+                                   personaID: fetchActivePersonaID(context: context)),
+        ]
+
+        return candidates
+            .compactMap { $0 }
+            .max(by: { $0.urgencyScore < $1.urgencyScore })
+    }
+
+    // MARK: Pattern: Health ↔ Work (original)
+
+    private func evaluateHealthWork(health: [NodeRecord], work: [NodeRecord],
+                                    all: [NodeRecord],
+                                    personaID: String?) -> DebateTrigger? {
+        guard !health.isEmpty, !work.isEmpty else { return nil }
+
+        var score = 0.0
         var signals: [String] = []
 
-        // Signal 1: Sleep data present (health domain active)
-        let sleepNodes = recentHealth.filter {
-            $0.tags.contains("수면") || $0.title.contains("수면") || $0.title.contains("Sleep")
+        let sleepCount = health.filter {
+            $0.tags.contains("수면") || $0.title.localizedCaseInsensitiveContains("수면")
+        }.count
+        if sleepCount >= 2 {
+            score += 0.3; signals.append("수면 기록 \(sleepCount)개")
+        } else if !health.isEmpty {
+            score += 0.15; signals.append("건강 데이터 \(health.count)개")
         }
-        if sleepNodes.count >= 2 {
-            urgencyScore += 0.3
-            signals.append("최근 \(sleepNodes.count)개 수면 기록")
-        } else if !recentHealth.isEmpty {
-            urgencyScore += 0.15
-            signals.append("최근 건강 데이터 \(recentHealth.count)개")
-        }
-
-        // Signal 2: High reminder/task volume
-        if recentReminder.count >= 5 {
-            urgencyScore += 0.3
-            signals.append("최근 7일 알림 \(recentReminder.count)개")
-        } else if recentReminder.count >= 2 {
-            urgencyScore += 0.15
-            signals.append("최근 7일 알림 \(recentReminder.count)개")
+        if work.count >= 5 { score += 0.3; signals.append("업무 항목 \(work.count)개") }
+        else if work.count >= 2 { score += 0.15; signals.append("업무 항목 \(work.count)개") }
+        if health.count >= 3 && work.count >= 3 {
+            score += 0.2; signals.append("건강×업무 교차")
         }
 
-        // Signal 3: Cross-domain data density (both domains active)
-        let workCount = recentReminder.count + recentCalendar.count
-        if recentHealth.count >= 3 && workCount >= 3 {
-            urgencyScore += 0.2
-            signals.append("건강(\(recentHealth.count)) + 업무(\(workCount)) 데이터 교차")
-        }
-
-        // Signal 4: No important nodes created recently (cognitive disengagement)
-        let importantRecent = fetchImportantNodes(context: context, since: sevenDaysAgo)
-        if importantRecent.isEmpty && (recentHealth.count + workCount) >= 5 {
-            urgencyScore += 0.2
-            signals.append("중요 노드 생성 없음 (7일)")
-        }
-
-        guard urgencyScore >= 0.6 else { return nil }
-
-        // Build pre-digested domain summaries (no raw PII sent to external APIs)
-        let healthSummary = recentHealth.prefix(10)
-            .map { "- \($0.title): \($0.summary)" }
-            .joined(separator: "\n")
-        let workSummary = (recentReminder + recentCalendar).prefix(10)
-            .map { "- \($0.title): \($0.summary)" }
-            .joined(separator: "\n")
-
-        let activePersonaID = fetchActivePersonaID(context: context)
+        guard score >= 0.6 else { return nil }
 
         return DebateTrigger(
-            primaryDomain: .health,
-            secondaryDomain: .work,
-            evidenceNodeIDs: (recentHealth + recentReminder).prefix(5).map { $0.id },
-            patternDescription: "감지된 패턴: \(signals.joined(separator: " | "))",
-            urgencyScore: urgencyScore,
-            primaryDomainSummary: healthSummary,
-            secondaryDomainSummary: workSummary,
-            personaID: activePersonaID
+            primaryDomain: .health, secondaryDomain: .work,
+            evidenceNodeIDs: all.prefix(5).map { $0.id },
+            patternDescription: "건강×업무 패턴: \(signals.joined(separator: " | "))",
+            urgencyScore: score,
+            primaryDomainSummary: health.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            secondaryDomainSummary: work.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            personaID: personaID
+        )
+    }
+
+    // MARK: Pattern: Health ↔ Finance
+
+    private func evaluateHealthFinance(health: [NodeRecord], finance: [NodeRecord],
+                                       personaID: String?) -> DebateTrigger? {
+        guard health.count >= 2, finance.count >= 2 else { return nil }
+
+        var score = 0.0
+        var signals: [String] = []
+
+        // Stress + spending spike
+        let stressNodes = health.filter {
+            $0.tags.contains("스트레스") || $0.title.localizedCaseInsensitiveContains("심박")
+        }
+        if !stressNodes.isEmpty {
+            score += 0.35; signals.append("스트레스 지표 \(stressNodes.count)개")
+        }
+        if finance.count >= 3 {
+            score += 0.3; signals.append("금융 기록 \(finance.count)개")
+        }
+        if health.count >= 2 && finance.count >= 2 {
+            score += 0.2; signals.append("건강×금융 교차")
+        }
+
+        guard score >= 0.6 else { return nil }
+
+        return DebateTrigger(
+            primaryDomain: .health, secondaryDomain: .finance,
+            evidenceNodeIDs: (health + finance).prefix(5).map { $0.id },
+            patternDescription: "건강×금융 패턴: \(signals.joined(separator: " | "))",
+            urgencyScore: score,
+            primaryDomainSummary: health.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            secondaryDomainSummary: finance.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            personaID: personaID
+        )
+    }
+
+    // MARK: Pattern: Finance ↔ Hobby
+
+    private func evaluateFinanceHobby(finance: [NodeRecord], hobby: [NodeRecord],
+                                      personaID: String?) -> DebateTrigger? {
+        guard finance.count >= 2, hobby.count >= 2 else { return nil }
+
+        var score = 0.0
+        var signals: [String] = []
+
+        if finance.count >= 3 { score += 0.3; signals.append("금융 기록 \(finance.count)개") }
+        if hobby.count >= 3   { score += 0.3; signals.append("취미 활동 \(hobby.count)개") }
+        if finance.count >= 2 && hobby.count >= 2 {
+            score += 0.25; signals.append("금융×취미 교차")
+        }
+
+        guard score >= 0.6 else { return nil }
+
+        return DebateTrigger(
+            primaryDomain: .finance, secondaryDomain: .personal,
+            evidenceNodeIDs: (finance + hobby).prefix(5).map { $0.id },
+            patternDescription: "금융×취미 패턴: \(signals.joined(separator: " | "))",
+            urgencyScore: score,
+            primaryDomainSummary: finance.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            secondaryDomainSummary: hobby.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            personaID: personaID
+        )
+    }
+
+    // MARK: Pattern: Academic ↔ Health
+
+    private func evaluateAcademicHealth(academic: [NodeRecord], health: [NodeRecord],
+                                        personaID: String?) -> DebateTrigger? {
+        guard academic.count >= 3, health.count >= 2 else { return nil }
+
+        var score = 0.0
+        var signals: [String] = []
+
+        let studyNodes = academic.filter {
+            $0.tags.contains("학습") || $0.tags.contains("공부") ||
+            $0.title.localizedCaseInsensitiveContains("학습")
+        }
+        if studyNodes.count >= 2 { score += 0.3; signals.append("학습 항목 \(studyNodes.count)개") }
+        else if !academic.isEmpty { score += 0.15; signals.append("학업 기록 \(academic.count)개") }
+
+        let sleepCount = health.filter {
+            $0.tags.contains("수면") || $0.title.localizedCaseInsensitiveContains("수면")
+        }.count
+        if sleepCount >= 2 { score += 0.3; signals.append("수면 기록 \(sleepCount)개") }
+        else if !health.isEmpty { score += 0.15; signals.append("건강 데이터 \(health.count)개") }
+
+        if academic.count >= 3 && health.count >= 2 {
+            score += 0.2; signals.append("학업×건강 교차")
+        }
+
+        guard score >= 0.6 else { return nil }
+
+        return DebateTrigger(
+            primaryDomain: .academic, secondaryDomain: .health,
+            evidenceNodeIDs: (academic + health).prefix(5).map { $0.id },
+            patternDescription: "학업×건강 패턴: \(signals.joined(separator: " | "))",
+            urgencyScore: score,
+            primaryDomainSummary: academic.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            secondaryDomainSummary: health.prefix(8).map { "- \($0.title): \($0.summary)" }.joined(separator: "\n"),
+            personaID: personaID
         )
     }
 
@@ -220,7 +394,7 @@ actor NodeManagerAgent {
             clusterSummary = "\(nodes.count)개의 관련 노드 클러스터"
         }
 
-        let personaID = nodes.first?.personaID
+        let clusterPersonaIDs = nodes.first?.personaIDs ?? []
         let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         let today = String(format: "%04d-%02d-%02d", comps.year ?? 0, comps.month ?? 0, comps.day ?? 0)
 
@@ -235,7 +409,7 @@ actor NodeManagerAgent {
             positionX: Double.random(in: -300...300),
             positionY: Double.random(in: -300...300),
             sourceSystemRaw: SourceSystem.aiGenerated.rawValue,
-            personaID: personaID,
+            personaIDs: clusterPersonaIDs,
             schemaVersion: 2,
             isProcessed: true
         )
@@ -298,6 +472,63 @@ actor NodeManagerAgent {
         if createdLinks > 0 { try? context.save() }
     }
 
+    // MARK: - Persona Threshold Check
+
+    private static let personaThreshold = 10
+
+    /// Maps SourceSystem → PersonaType for threshold inference.
+    /// Nodes whose source clearly belongs to a domain are counted toward that domain.
+    private static let sourceToPersonaType: [SourceSystem: PersonaType] = [
+        .healthKit:  .health,
+        .screenTime: .health,
+        .finance:    .finance,
+        .photos:     .hobby,
+    ]
+
+    /// Count unattached nodes by inferred PersonaType.
+    /// "Unattached" means no persona assignment (both legacy personaID nil and personaIDs empty).
+    private func countNodesByInferredPersonaType(context: ModelContext) -> [PersonaType: Int] {
+        let descriptor = FetchDescriptor<NodeRecord>(
+            predicate: #Predicate { $0.personaID == nil && $0.personaIDs.isEmpty }
+        )
+        let nodes = (try? context.fetch(descriptor)) ?? []
+        var counts: [PersonaType: Int] = [:]
+        for node in nodes {
+            guard let source = SourceSystem(rawValue: node.sourceSystemRaw),
+                  let pType = Self.sourceToPersonaType[source] else { continue }
+            counts[pType, default: 0] += 1
+        }
+        return counts
+    }
+
+    /// If any PersonaType has ≥ threshold unattached nodes but no corresponding
+    /// PersonaRecord exists yet, surface a suggestion via GraphViewModel.
+    private func checkPersonaThresholds(context: ModelContext, viewModel: GraphViewModel) async {
+        let counts = countNodesByInferredPersonaType(context: context)
+        guard !counts.isEmpty else { return }
+
+        // Fetch existing persona types
+        let descriptor = FetchDescriptor<PersonaRecord>()
+        let existingTypes = Set(
+            ((try? context.fetch(descriptor)) ?? []).compactMap { $0.personaType }
+        )
+
+        // Pick the type with the highest count that exceeds threshold and is missing
+        let suggestion = counts
+            .filter { $0.value >= Self.personaThreshold && !existingTypes.contains($0.key) }
+            .max(by: { $0.value < $1.value })
+            .map { $0.key }
+
+        guard let suggested = suggestion else { return }
+
+        await MainActor.run {
+            // Only update if not already showing a suggestion
+            if viewModel.pendingPersonaSuggestion == nil {
+                viewModel.pendingPersonaSuggestion = suggested
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func fetchUnprocessedNodes(context: ModelContext) -> [NodeRecord] {
@@ -311,6 +542,14 @@ actor NodeManagerAgent {
         let raw = type.rawValue
         let descriptor = FetchDescriptor<NodeRecord>(
             predicate: #Predicate { $0.nodeTypeRaw == raw }
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    private func fetchNodesBySource(_ source: SourceSystem, context: ModelContext) -> [NodeRecord] {
+        let raw = source.rawValue
+        let descriptor = FetchDescriptor<NodeRecord>(
+            predicate: #Predicate { $0.sourceSystemRaw == raw }
         )
         return (try? context.fetch(descriptor)) ?? []
     }
@@ -349,16 +588,3 @@ struct ClusterResult {
     var summary: String
 }
 
-// MARK: - GraphViewModel extension
-
-extension GraphViewModel {
-    /// Kick off the NodeManagerAgent in the background.
-    /// Call after ecosystem sync or app foreground.
-    @MainActor
-    func runNodeManager(modelContext: ModelContext) {
-        Task {
-            await NodeManagerAgent.shared.run(context: modelContext, viewModel: self)
-        }
-    }
-
-}

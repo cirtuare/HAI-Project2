@@ -147,6 +147,11 @@ struct DetailInspectorView: View {
 
                 Divider()
 
+                // Persona assignment
+                personaAssignmentSection(node: node)
+
+                Divider()
+
                 // AI Prompt generation section (single node)
                 aiPromptSection(node: node)
 
@@ -213,6 +218,118 @@ struct DetailInspectorView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Persona Assignment Section (Task 1A/1B)
+    // ─────────────────────────────────────────────
+
+    @ViewBuilder
+    private func personaAssignmentSection(node: GraphNode) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("담당 페르소나", systemImage: "person.crop.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // Count badge when multiple are assigned
+                if node.personaIDs.count > 1 {
+                    Text("\(node.personaIDs.count)개")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.cyan.opacity(0.8))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.cyan.opacity(0.1)))
+                }
+            }
+
+            VStack(spacing: 4) {
+                // "없음 (전체 공유)" toggle
+                personaToggleRow(
+                    isOn: node.personaIDs.isEmpty,
+                    label: "없음 (전체 공유)",
+                    icon: "globe",
+                    accentHex: "#64748b"
+                ) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        vm.assignPersona(nil, to: node.id)
+                    }
+                }
+
+                if !vm.personas.isEmpty {
+                    Divider()
+                        .opacity(0.3)
+                        .padding(.vertical, 2)
+
+                    ForEach(vm.personas, id: \.id) { persona in
+                        let isAssigned = node.personaIDs.contains(persona.id)
+                        personaToggleRow(
+                            isOn: isAssigned,
+                            label: persona.name,
+                            icon: persona.personaType?.icon ?? "person.fill",
+                            accentHex: persona.accentColorHex
+                        ) {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                if isAssigned {
+                                    vm.removePersona(persona.id, from: node.id)
+                                } else {
+                                    vm.addPersona(persona.id, to: node.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    private func personaToggleRow(
+        isOn: Bool,
+        label: String,
+        icon: String,
+        accentHex: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let accent = Color(hex: accentHex)
+        return Button(action: action) {
+            HStack(spacing: 9) {
+                // Persona icon badge
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isOn ? accent : accent.opacity(0.15))
+                        .frame(width: 22, height: 22)
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isOn ? .white : accent)
+                }
+
+                Text(label)
+                    .font(.system(size: 12, weight: isOn ? .semibold : .regular))
+                    .foregroundStyle(isOn ? .primary : Color.white.opacity(0.55))
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                // Checkmark
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(isOn ? accent : Color.white.opacity(0.2))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .animation(.easeInOut(duration: 0.15), value: isOn)
     }
 
     // ─────────────────────────────────────────────

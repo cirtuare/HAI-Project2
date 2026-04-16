@@ -78,14 +78,14 @@ final class HealthKitSyncProvider {
                    let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
                     UserDefaults.standard.set(data, forKey: anchorKey)
                 }
-                let nodes = self?.convert(samples: samples, personaID: personaID) ?? []
+                let nodes = self?.convert(samples: samples, personaIDs: [personaID]) ?? []
                 continuation.resume(returning: nodes)
             }
             store.execute(query)
         }
     }
 
-    private func convert(samples: [HKSample], personaID: String) -> [GraphNode] {
+    private func convert(samples: [HKSample], personaIDs: [String]) -> [GraphNode] {
         let formatter = ISO8601DateFormatter()
         return samples.compactMap { sample -> GraphNode? in
             let dateStr = formatter.string(from: sample.startDate).prefix(10).description
@@ -104,7 +104,7 @@ final class HealthKitSyncProvider {
                     position: randomCanvasPosition(),
                     sourceSystem: .healthKit,
                     externalID: sample.uuid.uuidString,
-                    personaID: personaID
+                    personaIDs: personaIDs
                 )
             } else if let category = sample as? HKCategorySample,
                       category.categoryType == HKCategoryType(.sleepAnalysis) {
@@ -122,7 +122,7 @@ final class HealthKitSyncProvider {
                     position: randomCanvasPosition(),
                     sourceSystem: .healthKit,
                     externalID: sample.uuid.uuidString,
-                    personaID: personaID
+                    personaIDs: personaIDs
                 )
             }
             return nil
@@ -154,7 +154,7 @@ final class HealthKitSyncProvider {
     }
 
     private func readTypes(for persona: PersonaRecord) -> Set<HKSampleType> {
-        let identifiers = persona.personaType?.relevantHealthTypes ?? PersonaType.personal.relevantHealthTypes
+        let identifiers = persona.personaType?.relevantHealthTypes ?? PersonaType.health.relevantHealthTypes
         var types = Set<HKSampleType>()
         for id in identifiers {
             switch id {

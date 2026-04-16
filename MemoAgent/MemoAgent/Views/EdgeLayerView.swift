@@ -55,6 +55,21 @@ struct EdgeLayerView: View {
     // MARK: Edge Canvas
     // ─────────────────────────────────────────────
 
+    // Returns the blended tension color if src and tgt belong to different personas, else nil.
+    private func tensionColor(for edge: GraphEdge) -> Color? {
+        guard let src = vm.nodes.first(where: { $0.id == edge.sourceID }),
+              let tgt = vm.nodes.first(where: { $0.id == edge.targetID }),
+              let srcPID = src.personaIDs.first,
+              let tgtPID = tgt.personaIDs.first,
+              srcPID != tgtPID else { return nil }
+        let srcHex = vm.personas.first(where: { $0.id == srcPID })?.personaType?.accentHex ?? "#94a3b8"
+        let tgtHex = vm.personas.first(where: { $0.id == tgtPID })?.personaType?.accentHex ?? "#94a3b8"
+        // Visually indicate both sides: use source persona color
+        // (Canvas can't do linear gradient on arbitrary paths; we use a distinctive solid color)
+        _ = tgtHex  // reserved for future bicolor rendering
+        return Color(hex: srcHex)
+    }
+
     private var edgeCanvas: some View {
         ZStack {
             // Layer 1: solid + dashed (non-animated) edges — redraws instantly on node move
@@ -68,22 +83,40 @@ struct EdgeLayerView: View {
                     let (p0, p3) = bestEndpoints(src: src, tgt: tgt)
                     let path = bezierPath(from: p0, to: p3)
                     let isHovered   = vm.hoveredEdgeID == edge.id
-                    let strokeColor = edgeColor(edge: edge, hovered: isHovered)
                     let lineWidth   = edgeLineWidth(edge: edge, hovered: isHovered)
 
-                    if edge.style.isUserCreated {
+                    // Cross-persona "Tension" edge: wider dashed + accent glow
+                    if let tColor = tensionColor(for: edge) {
+                        let opacity: Double = isHovered ? 0.95 : 0.65
+                        // Glow pass (wide, dim)
                         context.stroke(
                             path,
-                            with: .color(strokeColor),
+                            with: .color(tColor.opacity(opacity * 0.3)),
+                            style: StrokeStyle(lineWidth: lineWidth + 4, lineCap: .round)
+                        )
+                        // Main dashed stroke
+                        context.stroke(
+                            path,
+                            with: .color(tColor.opacity(opacity)),
                             style: StrokeStyle(lineWidth: lineWidth, lineCap: .round,
-                                               dash: [5, 5], dashPhase: 0)
+                                               dash: [7, 5], dashPhase: 0)
                         )
                     } else {
-                        context.stroke(
-                            path,
-                            with: .color(strokeColor),
-                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
-                        )
+                        let strokeColor = edgeColor(edge: edge, hovered: isHovered)
+                        if edge.style.isUserCreated {
+                            context.stroke(
+                                path,
+                                with: .color(strokeColor),
+                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round,
+                                                   dash: [5, 5], dashPhase: 0)
+                            )
+                        } else {
+                            context.stroke(
+                                path,
+                                with: .color(strokeColor),
+                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+                            )
+                        }
                     }
 
                     if !edge.relationship.isEmpty {
@@ -113,11 +146,13 @@ struct EdgeLayerView: View {
 
                             let (p0, p3) = bestEndpoints(src: src, tgt: tgt)
                             let path = bezierPath(from: p0, to: p3)
-                            let isHovered   = vm.hoveredEdgeID == edge.id
-                            let strokeColor = edgeColor(edge: edge, hovered: isHovered)
-                            let lineWidth   = edgeLineWidth(edge: edge, hovered: isHovered)
-                            let dashLength: CGFloat = 5
-                            let gapLength:  CGFloat = 5
+                            let isHovered = vm.hoveredEdgeID == edge.id
+                            let lineWidth = edgeLineWidth(edge: edge, hovered: isHovered)
+                            // Tension edges use their accent color when animated
+                            let strokeColor = tensionColor(for: edge)
+                                ?? edgeColor(edge: edge, hovered: isHovered)
+                            let dashLength: CGFloat = tensionColor(for: edge) != nil ? 8 : 5
+                            let gapLength:  CGFloat = tensionColor(for: edge) != nil ? 5 : 5
                             let phase = CGFloat(t.truncatingRemainder(dividingBy: 1.0)) * (dashLength + gapLength) * -1
                             context.stroke(
                                 path,

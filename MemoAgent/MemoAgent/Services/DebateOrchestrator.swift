@@ -56,8 +56,31 @@ struct DebateSynthesisResult {
 // MARK: - SpecialistRole
 
 private enum SpecialistRole: String {
-    case health = "health"
-    case work   = "work"
+    case health   = "health"
+    case work     = "work"
+    case finance  = "finance"
+    case hobby    = "hobby"
+    case academic = "academic"
+
+    /// Map a PersonaType to the matching SpecialistRole.
+    nonisolated static func from(_ personaType: PersonaType) -> SpecialistRole {
+        switch personaType {
+        case .health:   return .health
+        case .academic: return .academic
+        case .finance:  return .finance
+        case .hobby:    return .hobby
+        }
+    }
+
+    var domainLabel: String {
+        switch self {
+        case .health:   return "건강"
+        case .work:     return "업무"
+        case .finance:  return "금융"
+        case .hobby:    return "취미"
+        case .academic: return "학업"
+        }
+    }
 
     var systemPrompt: String {
         switch self {
@@ -75,11 +98,31 @@ private enum SpecialistRole: String {
             단순 나열이 아닌 인과관계와 메커니즘을 설명하세요. 가설을 명확히 진술하세요.
             응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.79
             """
+        case .finance:
+            return """
+            당신은 개인 재무 전문 분석가입니다. 제공된 지출 패턴과 재무 데이터를 분석하여 \
+            재무 건전성, 위험 요소, 개선 기회를 파악합니다.
+            감정적 지출과 이성적 지출의 차이, 현금흐름 패턴에 주목하세요.
+            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.80
+            """
+        case .hobby:
+            return """
+            당신은 라이프스타일과 취미 활동 전문 분석가입니다. 제공된 활동 데이터를 분석하여 \
+            삶의 균형, 열정 지수, 번아웃 위험을 파악합니다.
+            창의적 활동과 회복 활동의 균형, 몰입 패턴에 주목하세요.
+            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.76
+            """
+        case .academic:
+            return """
+            당신은 학습 및 지식 관리 전문 분석가입니다. 제공된 학습 패턴과 지식 기록을 분석하여 \
+            학습 효율, 기억 유지율, 개념 연결성을 파악합니다.
+            능동적 회상과 분산 학습의 효과, 지식 간 연결 패턴에 주목하세요.
+            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.81
+            """
         }
     }
 
     var rebuttalPrompt: String {
-        let domainLabel = self == .health ? "건강" : "업무"
         return """
         당신은 \(domainLabel) 분석 전문가입니다. 상대 에이전트의 분석을 검토하고 \
         반드시 최소 하나 이상의 구체적인 반론 또는 보완점을 제시하세요.
@@ -110,7 +153,112 @@ actor DebateOrchestrator {
     private let maxTranscriptChars = 3000
     private let maxTokensPerTurn = 800
 
-    // MARK: - Entry Point
+    /// Called on the MainActor each time an AgentTurn completes (for live visualization).
+    var onTurnCompleted: (@Sendable (AgentTurn) -> Void)? = nil
+
+    // MARK: - Manual Trigger (user-initiated from MultiPersonaChatView)
+
+    /// Runs a debate for any persona combination chosen by the user.
+    func startManualDebate(personaTypes: [PersonaType],
+                            query: String,
+                            context: ModelContext,
+                            viewModel: GraphViewModel) async {
+        guard personaTypes.count >= 2 else { return }
+        let roles = personaTypes.map { SpecialistRole.from($0) }
+
+        let record = DebateRecord(
+            triggerDescription: "수동 토론: \(String(query.prefix(60)))",
+            status: "running",
+            personaID: nil,
+            debateHash: "manual-\(Int(Date().timeIntervalSince1970))"
+        )
+        context.insert(record)
+        try? context.save()
+
+        await MainActor.run {
+            viewModel.debateStatus = "AI 멀티 에이전트 토론 준비 중..."
+        }
+
+        do {
+            var transcript: [AgentTurn] = []
+
+            // ── Round 1: Parallel per-persona analysis ───────────────────
+            try await withThrowingTaskGroup(of: AgentTurn.self) { group in
+                for role in roles {
+                    group.addTask {
+                        try await self.callSpecialist(role, summary: query,
+                                                      triggerContext: query)
+                    }
+                }
+                for try await turn in group {
+                    transcript.append(turn)
+                    let t = turn
+                    await MainActor.run {
+                        viewModel.liveDebateTurns.append(t)
+                        viewModel.debateStatus = "\(t.domain) 분석 완료"
+                    }
+                    onTurnCompleted?(turn)
+                }
+            }
+
+            // ── Round 2: Cross-domain rebuttals ───────────────────────────
+            await MainActor.run { viewModel.debateStatus = "교차 반론 생성 중..." }
+            let round1 = transcript
+            for role in roles {
+                let own   = round1.first { $0.agentID == role.rawValue }?.content ?? ""
+                let other = round1.filter { $0.agentID != role.rawValue }
+                                   .map { $0.content }.joined(separator: "\n---\n")
+                guard !own.isEmpty, !other.isEmpty else { continue }
+                let rebuttal = try await callRebuttal(role, own: own, other: other)
+                transcript.append(rebuttal)
+                let r = rebuttal
+                await MainActor.run { viewModel.liveDebateTurns.append(r) }
+                onTurnCompleted?(rebuttal)
+            }
+
+            // ── Round 3: On-device synthesis ──────────────────────────────
+            await MainActor.run { viewModel.debateStatus = "최종 종합 분석 중..." }
+            let fakeTrigger = DebateTrigger(
+                primaryDomain:        .health, secondaryDomain: .work,
+                evidenceNodeIDs:      [],
+                patternDescription:   query,
+                urgencyScore:         0.8,
+                primaryDomainSummary: query,
+                secondaryDomainSummary: "",
+                personaID:            nil
+            )
+            let compressed = compressTranscript(transcript)
+            let synthesis  = try await synthesize(compressed: compressed, trigger: fakeTrigger)
+            transcript.append(synthesis)
+
+            let transcriptData = (try? JSONEncoder().encode(transcript)) ?? Data()
+            record.agentTranscriptJSON = transcriptData
+            record.synthesisResult     = synthesis.content
+            record.status              = "completed"
+            try? context.save()
+
+            let notifSummary = parseSynthesisJSON(synthesis.content)?.rootCause
+                ?? String(synthesis.content.prefix(100))
+            await NotificationService.shared.sendDebateCompletionNotification(
+                title: "멀티 에이전트 토론 완료",
+                summary: notifSummary
+            )
+
+            let finalTranscript = transcript
+            await MainActor.run {
+                viewModel.activeDebateResult     = synthesis.content
+                viewModel.activeDebateTranscript = finalTranscript
+                viewModel.debateStatus           = nil
+                viewModel.refreshFromSwiftData()
+            }
+        } catch {
+            record.status = "failed"
+            try? context.save()
+            await MainActor.run { viewModel.debateStatus = nil }
+        }
+    }
+
+    // MARK: - Entry Point (automatic trigger)
 
     /// Start a multi-agent debate for the given trigger.
     /// Runs entirely in the background; UI updates go through MainActor.
@@ -184,10 +332,16 @@ actor DebateOrchestrator {
             record.status              = "completed"
             try? context.save()
 
+            let notifSummary = parseSynthesisJSON(synthesis.content)?.rootCause
+                ?? String(synthesis.content.prefix(100))
+            await NotificationService.shared.sendDebateCompletionNotification(summary: notifSummary)
+
+            let finalTranscript = transcript
             await MainActor.run {
-                viewModel.activeDebateResult    = synthesis.content
-                viewModel.debateStatus          = nil
-                viewModel.debateEvidenceNodeIDs = []
+                viewModel.activeDebateResult     = synthesis.content
+                viewModel.activeDebateTranscript = finalTranscript
+                viewModel.debateStatus           = nil
+                viewModel.debateEvidenceNodeIDs  = []
                 viewModel.refreshFromSwiftData()
             }
         } catch {

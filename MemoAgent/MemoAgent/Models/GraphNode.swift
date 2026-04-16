@@ -99,11 +99,11 @@ struct GraphNode: Identifiable, Hashable, Codable {
 
     // MARK: V2 extensions (default values preserve V1 Codable compatibility)
     var sourceSystem: SourceSystem
-    var externalID: String?    // Apple system record ID (for deduplication)
-    var personaID: String?     // nil = visible to all personas
+    var externalID: String?      // Apple system record ID (for deduplication)
+    var personaIDs: [String]     // empty = visible to all personas; multiple = shared across personas
 
     // MARK: - Init (V1 callers unchanged — new fields have defaults)
-    init(id: String,
+    nonisolated init(id: String,
          title: String,
          summary: String,
          type: NodeType,
@@ -114,6 +114,8 @@ struct GraphNode: Identifiable, Hashable, Codable {
          position: CGPoint,
          sourceSystem: SourceSystem = .userCreated,
          externalID: String? = nil,
+         personaIDs: [String] = [],
+         // Legacy single-persona shim — callers that pass personaID get wrapped automatically
          personaID: String? = nil) {
         self.id = id
         self.title = title
@@ -126,13 +128,40 @@ struct GraphNode: Identifiable, Hashable, Codable {
         self.position = position
         self.sourceSystem = sourceSystem
         self.externalID = externalID
-        self.personaID = personaID
+        // Merge: explicit personaIDs takes priority; fall back to legacy single personaID
+        if !personaIDs.isEmpty {
+            self.personaIDs = personaIDs
+        } else if let pid = personaID {
+            self.personaIDs = [pid]
+        } else {
+            self.personaIDs = []
+        }
     }
 
     // MARK: - Codable (custom — decodeIfPresent for V2 fields so V1 JSON still loads)
-    enum CodingKeys: String, CodingKey {
+    // Separate enums so the legacy `personaID` key is only used for decoding (no stored property).
+    private enum CodingKeys: String, CodingKey {
         case id, title, summary, type, date, originalText, isImportant, tags, position
-        case sourceSystem, externalID, personaID
+        case sourceSystem, externalID, personaIDs
+    }
+    private enum LegacyCodingKeys: String, CodingKey {
+        case personaID
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id,           forKey: .id)
+        try c.encode(title,        forKey: .title)
+        try c.encode(summary,      forKey: .summary)
+        try c.encode(type,         forKey: .type)
+        try c.encode(date,         forKey: .date)
+        try c.encode(originalText, forKey: .originalText)
+        try c.encode(isImportant,  forKey: .isImportant)
+        try c.encode(tags,         forKey: .tags)
+        try c.encode(position,     forKey: .position)
+        try c.encode(sourceSystem, forKey: .sourceSystem)
+        try c.encodeIfPresent(externalID, forKey: .externalID)
+        try c.encode(personaIDs,   forKey: .personaIDs)
     }
 
     init(from decoder: Decoder) throws {
@@ -149,7 +178,14 @@ struct GraphNode: Identifiable, Hashable, Codable {
         // V2 fields — default-to-nil/userCreated when loading old V1 JSON
         sourceSystem = try c.decodeIfPresent(SourceSystem.self, forKey: .sourceSystem) ?? .userCreated
         externalID  = try c.decodeIfPresent(String.self, forKey: .externalID)
-        personaID   = try c.decodeIfPresent(String.self, forKey: .personaID)
+        // V3 multi-persona: read personaIDs array; fall back to legacy single personaID string
+        if let ids = try c.decodeIfPresent([String].self, forKey: .personaIDs) {
+            personaIDs = ids
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            let legacyID = try legacy.decodeIfPresent(String.self, forKey: .personaID)
+            personaIDs = legacyID.map { [$0] } ?? []
+        }
     }
 
     // MARK: - Hashable

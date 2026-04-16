@@ -53,6 +53,8 @@ struct NodeCardView: View {
     let searchOpacity: Double
     /// True when the debate agent is actively analyzing this node (shows pulse glow).
     var isDebateEvidence: Bool = false
+    /// Accent colors of the node's assigned personas (empty when unassigned).
+    var personaColors: [Color] = []
 
     /// Called when the user selects "삭제" from the context menu.
     var onDelete: () -> Void = {}
@@ -68,12 +70,14 @@ struct NodeCardView: View {
 
     init(node: GraphNode, isSelected: Bool, isConnectionTarget: Bool = false,
          searchOpacity: Double, isDebateEvidence: Bool = false,
+         personaColors: [Color] = [],
          onDelete: @escaping () -> Void = {}) {
         self.node = node
         self.isSelected = isSelected
         self.isConnectionTarget = isConnectionTarget
         self.searchOpacity = searchOpacity
         self.isDebateEvidence = isDebateEvidence
+        self.personaColors = personaColors
         self.onDelete = onDelete
         self.style = NodeTypeStyle.style(for: node.type)
         self.cardWidth = node.isImportant ? 240 : 210
@@ -81,7 +85,7 @@ struct NodeCardView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             // Evidence pulse ring — rendered behind card
             if isDebateEvidence {
                 debateEvidenceRing
@@ -91,8 +95,17 @@ struct NodeCardView: View {
                 debateClusterGlow
             }
             card
+        }
+        // Importance badge — top-right corner
+        .overlay(alignment: .topTrailing) {
             if node.isImportant || isDebateCluster {
                 importanceBadge
+            }
+        }
+        // Persona badge — bottom-left corner (up to 3 dots for multi-persona)
+        .overlay(alignment: .bottomLeading) {
+            if !personaColors.isEmpty {
+                personaBadge(colors: personaColors)
             }
         }
         // Evidence pulse animation lifecycle
@@ -310,6 +323,24 @@ struct NodeCardView: View {
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
             )
             .offset(x: 6, y: -6)
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Persona badge
+    // ─────────────────────────────────────────────
+
+    /// Colored dots in the bottom-left corner showing all assigned personas (max 3).
+    private func personaBadge(colors: [Color]) -> some View {
+        HStack(spacing: 3) {
+            ForEach(Array(colors.prefix(3).enumerated()), id: \.offset) { _, color in
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: color.opacity(0.6), radius: 3)
+            }
+        }
+        .padding(8)
+        .offset(x: -2, y: 2)
     }
 
     // ─────────────────────────────────────────────

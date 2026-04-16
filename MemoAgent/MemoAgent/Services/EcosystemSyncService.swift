@@ -5,6 +5,7 @@
 // Each sync operation collects nodes and pushes them to GraphViewModel.
 
 import Foundation
+import SwiftData
 
 // MARK: - EcosystemSyncService
 
@@ -58,6 +59,46 @@ actor EcosystemSyncService {
     func syncPhotos(persona: PersonaRecord, viewModel: GraphViewModel) async {
         let nodes = await PhotoKitSyncProvider.shared.fetchRecentPhotoNodes(for: persona, limit: 20)
         await MainActor.run { viewModel.insertEcosystemNodes(nodes) }
+    }
+
+    /// Parse a pasted Screen Time report and insert nodes for the health persona.
+    func syncScreenTime(
+        reportText: String,
+        persona: PersonaRecord,
+        viewModel: GraphViewModel,
+        context: ModelContext
+    ) async {
+        let (total, categories) = await ScreenTimeSyncProvider.shared.parse(reportText)
+        let nodes = await ScreenTimeSyncProvider.shared.createNodes(
+            reportText: reportText,
+            total: total,
+            categories: categories,
+            persona: persona
+        )
+        await ScreenTimeSyncProvider.shared.save(nodes: nodes, context: context, viewModel: viewModel)
+    }
+
+    /// Parse a pasted finance statement and insert entries + nodes for the finance persona.
+    func syncFinance(
+        statementText: String,
+        source: FinanceEntrySource = .text,
+        persona: PersonaRecord,
+        viewModel: GraphViewModel,
+        context: ModelContext
+    ) async -> Int {
+        let entries = await FinanceSyncProvider.shared.parse(statementText, source: source)
+        let nodes = await FinanceSyncProvider.shared.createNodes(
+            entries: entries,
+            rawText: statementText,
+            persona: persona
+        )
+        await FinanceSyncProvider.shared.save(
+            entries: entries,
+            nodes: nodes,
+            context: context,
+            viewModel: viewModel
+        )
+        return entries.count
     }
 }
 
