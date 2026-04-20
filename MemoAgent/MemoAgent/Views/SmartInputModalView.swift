@@ -17,7 +17,7 @@ struct SmartInputModalView: View {
 
     var availableWidth: CGFloat = 860
 
-    private var isNarrow: Bool { availableWidth < 750 }
+    private var isNarrow: Bool { availableWidth < 900 }
 
     var body: some View {
         VStack(spacing: 0) {

@@ -17,7 +17,7 @@ struct MultiPersonaChatView: View {
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
 
-    private var isNarrow: Bool { availableWidth < 680 }
+    private var isNarrow: Bool { availableWidth < 850 }
 
     var body: some View {
         Group {
