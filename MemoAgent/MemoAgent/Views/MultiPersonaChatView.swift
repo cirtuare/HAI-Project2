@@ -22,7 +22,7 @@ struct MultiPersonaChatView: View {
             Divider()
             chatPanel
         }
-        .frame(width: 780, height: 560)
+        .frame(minWidth: 620, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

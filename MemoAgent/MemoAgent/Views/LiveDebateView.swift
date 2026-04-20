@@ -21,7 +21,7 @@ struct LiveDebateView: View {
                 completeFooter
             }
         }
-        .frame(width: 660, height: 580)
+        .frame(minWidth: 520, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

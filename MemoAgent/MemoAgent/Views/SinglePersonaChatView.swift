@@ -26,7 +26,7 @@ struct SinglePersonaChatView: View {
             Divider().background(Color.white.opacity(0.08))
             inputBar
         }
-        .frame(width: 560, height: 620)
+        .frame(minWidth: 460, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

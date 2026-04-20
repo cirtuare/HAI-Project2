@@ -24,7 +24,7 @@ struct PersonaOnboardingView: View {
             Divider()
             footer
         }
-        .frame(width: 600, height: 560)
+        .frame(minWidth: 480, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#0f172a"))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

@@ -59,7 +59,7 @@ struct SettingsView: View {
                 .padding(24)
             }
         }
-        .frame(width: 520)
+        .frame(minWidth: 420, maxWidth: 580)
         .background(Color(hex: "#0f172a"))
         .colorScheme(.dark)
         .onAppear { loadStoredKeys() }
