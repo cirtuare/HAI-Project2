@@ -15,13 +15,16 @@ struct MultiPersonaChatView: View {
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
 
+    @State private var modalWidth: CGFloat = 780
+
     var body: some View {
         HStack(spacing: 0) {
             personaPanel
-                .frame(width: 220)
+                .frame(width: modalWidth < 620 ? 160 : 220)
             Divider()
             chatPanel
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { modalWidth = $0 }
         .frame(minWidth: 620, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))
         .colorScheme(.dark)

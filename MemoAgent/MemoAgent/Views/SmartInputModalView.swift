@@ -14,19 +14,31 @@ import SwiftData
 struct SmartInputModalView: View {
     @Environment(GraphViewModel.self) private var vm
     @Environment(\.dismiss) private var dismiss
+    @State private var modalWidth: CGFloat = 860
 
     var body: some View {
         VStack(spacing: 0) {
             modalHeader
             Divider()
-            HStack(spacing: 0) {
-                inputColumn
-                    .frame(maxWidth: .infinity)
-                Divider()
-                processingColumn
-                    .frame(maxWidth: .infinity)
+            if modalWidth < 680 {
+                VStack(spacing: 0) {
+                    inputColumn
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    processingColumn
+                        .frame(maxWidth: .infinity, maxHeight: 220)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    inputColumn
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    processingColumn
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { modalWidth = $0 }
         .frame(minWidth: 680, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))  // surface-elevated
         .colorScheme(.dark)  // force dark so .primary/.secondary resolve to white-family
