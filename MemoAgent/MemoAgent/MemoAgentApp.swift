@@ -49,6 +49,7 @@ struct MemoAgentApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .frame(minWidth: 800, minHeight: 600)
                 .environment(viewModel)
                 .modelContainer(MemoAgentApp.container)
                 // Request notification permission once at first launch
@@ -65,8 +66,6 @@ struct MemoAgentApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 1280, height: 800)
-        .windowResizability(.contentMinSize)
-        .defaultMinimumSize(width: 800, height: 600)
         // Run scheduled daily analysis on every scene foreground activation
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
