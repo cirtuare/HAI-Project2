@@ -303,7 +303,7 @@ struct SettingsView: View {
                 let prev = AIProviderManager.shared.selectedProvider
                 AIProviderManager.shared.selectedProvider = provider
                 let reply = try await AIProviderManager.shared.callAI(
-                    system: "You are a helpful assistant.",
+                    system: PromptStore.shared.prompt(for: .connectionTest),
                     userMessage: "Reply with exactly the word: OK",
                     maxTokens: 10
                 )

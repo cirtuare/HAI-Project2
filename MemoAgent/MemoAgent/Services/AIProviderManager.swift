@@ -416,7 +416,7 @@ final class AIProviderManager {
         let prevProvider = selectedProvider
         selectedProvider = provider
         defer { selectedProvider = prevProvider }
-        return try await callAI(system: "You are a helpful assistant.",
+        return try await callAI(system: PromptStore.shared.prompt(for: .connectionTest),
                                 userMessage: "Reply with exactly the word: OK",
                                 maxTokens: 10)
     }

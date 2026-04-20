@@ -65,7 +65,7 @@ struct MultiPersonaChatView: View {
                             personaChip(persona: persona, personaType: pType)
                         }
                     }
-                    if vm.chatSelectedPersonaTypes.count >= 2 {
+                    if vm.chatSelectedPersonaIDs.count >= 2 {
                         Button {
                             triggerDebate()
                         } label: {
@@ -99,19 +99,19 @@ struct MultiPersonaChatView: View {
     }
 
     private func personaChip(persona: PersonaRecord, personaType: PersonaType) -> some View {
-        let isSelected = vm.chatSelectedPersonaTypes.contains(personaType)
+        let isSelected = vm.chatSelectedPersonaIDs.contains(persona.id)
         let accent = Color(hex: personaType.accentHex)
         return Button {
             withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                if isSelected { vm.chatSelectedPersonaTypes.remove(personaType) }
-                else { vm.chatSelectedPersonaTypes.insert(personaType) }
+                if isSelected { vm.chatSelectedPersonaIDs.remove(persona.id) }
+                else { vm.chatSelectedPersonaIDs.insert(persona.id) }
             }
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: personaType.icon)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(isSelected ? accent : Color.white.opacity(0.4))
-                Text(personaType.localizedName)
+                Text(persona.name)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.5))
             }
@@ -171,7 +171,7 @@ struct MultiPersonaChatView: View {
             Spacer()
 
             // Debate trigger (only when ≥2 selected)
-            if vm.chatSelectedPersonaTypes.count >= 2 {
+            if vm.chatSelectedPersonaIDs.count >= 2 {
                 debateButton
                     .padding(12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -179,20 +179,20 @@ struct MultiPersonaChatView: View {
         }
         .background(Color(hex: "#0f172a").opacity(0.6))
         .animation(.spring(response: 0.3, dampingFraction: 0.8),
-                   value: vm.chatSelectedPersonaTypes.count)
+                   value: vm.chatSelectedPersonaIDs.count)
     }
 
     private func personaToggleCard(persona: PersonaRecord, personaType: PersonaType) -> some View {
-        let isSelected = vm.chatSelectedPersonaTypes.contains(personaType)
+        let isSelected = vm.chatSelectedPersonaIDs.contains(persona.id)
         let isSuggested = vm.suggestedPersonas.contains(personaType)
         let accent = Color(hex: personaType.accentHex)
 
         return Button {
             withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
                 if isSelected {
-                    vm.chatSelectedPersonaTypes.remove(personaType)
+                    vm.chatSelectedPersonaIDs.remove(persona.id)
                 } else {
-                    vm.chatSelectedPersonaTypes.insert(personaType)
+                    vm.chatSelectedPersonaIDs.insert(persona.id)
                 }
             }
         } label: {
@@ -209,7 +209,7 @@ struct MultiPersonaChatView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
-                        Text(personaType.localizedName)
+                        Text(persona.name)
                             .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                             .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.55))
 
@@ -301,12 +301,12 @@ struct MultiPersonaChatView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.85))
                 Spacer()
-                if vm.chatSelectedPersonaTypes.isEmpty {
+                if vm.chatSelectedPersonaIDs.isEmpty {
                     Text("페르소나를 선택하세요")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.white.opacity(0.3))
                 } else {
-                    Text("\(vm.chatSelectedPersonaTypes.count)개 참여 중")
+                    Text("\(vm.chatSelectedPersonaIDs.count)개 참여 중")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.cyan.opacity(0.8))
                 }
@@ -375,17 +375,18 @@ struct MultiPersonaChatView: View {
 
     private var loadingBubbles: some View {
         HStack(spacing: 8) {
-            ForEach(Array(vm.chatSelectedPersonaTypes), id: \.rawValue) { pType in
+            ForEach(vm.personas.filter { vm.chatSelectedPersonaIDs.contains($0.id) }, id: \.id) { persona in
+                let pType = persona.personaType
                 HStack(spacing: 5) {
                     TypingIndicator()
-                    Text(pType.localizedName)
+                    Text(persona.name)
                         .font(.system(size: 10))
-                        .foregroundStyle(Color(hex: pType.accentHex).opacity(0.7))
+                        .foregroundStyle(Color(hex: pType?.accentHex ?? "#64748b").opacity(0.7))
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
-                    Capsule().fill(Color(hex: pType.accentHex).opacity(0.1))
+                    Capsule().fill(Color(hex: pType?.accentHex ?? "#64748b").opacity(0.1))
                 )
             }
             Spacer()
@@ -426,7 +427,7 @@ struct MultiPersonaChatView: View {
 
     private var sendButton: some View {
         let canSend = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !vm.chatSelectedPersonaTypes.isEmpty
+            && !vm.chatSelectedPersonaIDs.isEmpty
             && !vm.isChatLoading
 
         return Button { sendMessage() } label: {
@@ -449,7 +450,7 @@ struct MultiPersonaChatView: View {
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !vm.chatSelectedPersonaTypes.isEmpty else { return }
+        guard !text.isEmpty, !vm.chatSelectedPersonaIDs.isEmpty else { return }
 
         if vm.activeChatSession == nil {
             // First message: use PersonaRouter to refine suggestions
@@ -459,8 +460,12 @@ struct MultiPersonaChatView: View {
                     availablePersonas: vm.personas
                 )
                 await MainActor.run {
-                    // Merge router suggestions with user's manual selection
-                    for p in routed { vm.chatSelectedPersonaTypes.insert(p) }
+                    // Merge router suggestions with user's manual selection (by persona ID)
+                    for pType in routed {
+                        if let match = vm.personas.first(where: { $0.personaType == pType }) {
+                            vm.chatSelectedPersonaIDs.insert(match.id)
+                        }
+                    }
                     vm.startChatSession(query: text)
                     inputText = ""
                 }
@@ -472,8 +477,9 @@ struct MultiPersonaChatView: View {
     }
 
     private func triggerDebate() {
-        guard vm.chatSelectedPersonaTypes.count >= 2 else { return }
-        let personaTypes = Array(vm.chatSelectedPersonaTypes)
+        guard vm.chatSelectedPersonaIDs.count >= 2 else { return }
+        let selectedPersonas = vm.personas.filter { vm.chatSelectedPersonaIDs.contains($0.id) }
+        let personaTypes = Array(Set(selectedPersonas.compactMap { $0.personaType }))
         let query = vm.chatMessages.last(where: { $0.role == ChatRole.user })?.content
             ?? "선택된 페르소나 간 교차 분석"
         vm.closeChat()
@@ -596,7 +602,7 @@ private struct TypingIndicator: View {
     container.mainContext.insert(p1)
     container.mainContext.insert(p2)
     vm.personas = [p1, p2]
-    vm.chatSelectedPersonaTypes = [.health]
+    vm.chatSelectedPersonaIDs = [p1.id]
     vm.suggestedPersonas = [.health]
 
     return MultiPersonaChatView()

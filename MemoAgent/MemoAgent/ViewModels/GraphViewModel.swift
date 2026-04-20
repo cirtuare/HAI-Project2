@@ -136,8 +136,8 @@ final class GraphViewModel {
     var activeChatSession: ChatSession? = nil
     /// Messages in the current chat session (in-memory mirror for the view).
     var chatMessages: [ChatMessage] = []
-    /// Persona types the user has selected for the current chat session.
-    var chatSelectedPersonaTypes: Set<PersonaType> = []
+    /// IDs of the individual personas the user has selected for the current chat session.
+    var chatSelectedPersonaIDs: Set<String> = []
     /// True while waiting for persona AI responses.
     var isChatLoading: Bool = false
     /// Error string shown in the chat UI.
@@ -354,12 +354,10 @@ final class GraphViewModel {
     /// Views use this instead of `nodes` directly.
     var visibleNodes: [GraphNode] {
         nodes.filter { node in
-            // Persona filter: show node if (1) no active persona, (2) node is global (no personas),
-            // or (3) node is assigned to the active persona.
+            // Persona filter: show node only if (1) no active persona,
+            // or (2) node is explicitly assigned to the active persona.
             if let persona = activePersona {
-                let isGlobal = node.personaIDs.isEmpty
-                let belongsHere = node.personaIDs.contains(persona.id)
-                guard isGlobal || belongsHere else { return false }
+                guard node.personaIDs.contains(persona.id) else { return false }
             }
             // Type filter
             guard typeFilters[node.type] == true else { return false }
@@ -574,17 +572,98 @@ final class GraphViewModel {
                 ($0.sourceID == tgt && $0.targetID == src)
             }
             if !alreadyConnected {
+                let edgeID = "e\(src)-\(tgt)-user"
                 let edge = GraphEdge(
-                    id: "e\(src)-\(tgt)-user",
+                    id: edgeID,
                     sourceID: src,
                     targetID: tgt,
                     relationship: "",
                     style: EdgeStyle(strokeWidth: 2, animated: true, isUserCreated: true)
                 )
                 edges.append(edge)
+                generateEdgeRelationship(edgeID: edgeID)
             }
         }
         persistGraph()
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: - Auto-link & Edge Relationship (Task 13 & 14)
+    // ─────────────────────────────────────────────
+
+    /// Links each new node to up to 2 existing nodes that share the most tags.
+    /// Uses the first shared tag as a heuristic relationship label.
+    private func autoLinkToExisting(newNodes: [GraphNode], existingNodes: [GraphNode]) {
+        for newNode in newNodes {
+            guard !newNode.tags.isEmpty else { continue }
+            let newTagSet = Set(newNode.tags.map { $0.lowercased() })
+
+            let candidates = existingNodes
+                .compactMap { existing -> (GraphNode, Set<String>)? in
+                    guard !existing.tags.isEmpty else { return nil }
+                    let overlap = Set(existing.tags.map { $0.lowercased() }).intersection(newTagSet)
+                    return overlap.isEmpty ? nil : (existing, overlap)
+                }
+                .sorted { $0.1.count > $1.1.count }
+                .prefix(2)
+
+            for (existing, sharedTags) in candidates {
+                let alreadyConnected = edges.contains {
+                    ($0.sourceID == newNode.id && $0.targetID == existing.id) ||
+                    ($0.sourceID == existing.id && $0.targetID == newNode.id)
+                }
+                guard !alreadyConnected else { continue }
+                let label = "#\(sharedTags.sorted().first ?? "관련")"
+                let edgeID = "e\(newNode.id)-\(existing.id)-auto"
+                edges.append(GraphEdge(
+                    id: edgeID,
+                    sourceID: newNode.id,
+                    targetID: existing.id,
+                    relationship: label,
+                    style: EdgeStyle(strokeWidth: 1, animated: false, isUserCreated: false)
+                ))
+            }
+        }
+    }
+
+    /// Asynchronously generates a concise relationship label for a user-created edge
+    /// via the active AI provider, then updates the edge in-place.
+    private func generateEdgeRelationship(edgeID: String) {
+        guard AIProviderManager.shared.selectedProvider != .appleIntelligence else { return }
+        guard let edgeIdx = edges.firstIndex(where: { $0.id == edgeID }),
+              let src = nodes.first(where: { $0.id == edges[edgeIdx].sourceID }),
+              let tgt = nodes.first(where: { $0.id == edges[edgeIdx].targetID }) else { return }
+
+        let srcTitle = src.title
+        let srcSummary = String(src.summary.prefix(60))
+        let tgtTitle = tgt.title
+        let tgtSummary = String(tgt.summary.prefix(60))
+
+        Task {
+            let userMsg = """
+                소스 노드: "\(srcTitle)" — \(srcSummary)
+                대상 노드: "\(tgtTitle)" — \(tgtSummary)
+
+                두 노드 사이의 관계를 2~4개 한국어 단어로 간결하게 표현하세요.
+                예시: "원인-결과", "보완 관계", "실습 vs 이론", "연장선"
+                관계 표현만 출력하세요. 다른 텍스트는 포함하지 마세요.
+                """
+            guard let raw = try? await AIProviderManager.shared.callAI(
+                system: PromptStore.shared.prompt(for: .edgeRelationship),
+                userMessage: userMsg, maxTokens: 20
+            ) else { return }
+            let label = raw
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\"", with: "")
+                .components(separatedBy: "\n").first ?? ""
+            guard !label.isEmpty else { return }
+            await MainActor.run {
+                if let idx = self.edges.firstIndex(where: { $0.id == edgeID }) {
+                    self.edges[idx].relationship = label
+                    self.persistGraph()
+                }
+            }
+        }
     }
 
     /// Remove all edges between any two currently selected nodes.
@@ -708,8 +787,9 @@ final class GraphViewModel {
         }
         guard !exists else { return }
 
+        let edgeID = "e\(srcID)-\(tgtID)"
         let edge = GraphEdge(
-            id: "e\(srcID)-\(tgtID)",
+            id: edgeID,
             sourceID: srcID,
             targetID: tgtID,
             relationship: "",
@@ -717,6 +797,7 @@ final class GraphViewModel {
         )
         edges.append(edge)
         persistGraph()
+        generateEdgeRelationship(edgeID: edgeID)
     }
 
     /// Cancel an in-progress connection drag without creating an edge.
@@ -758,12 +839,7 @@ final class GraphViewModel {
                 try await Task.sleep(for: .milliseconds(400))
                 await MainActor.run { modalProcessStep = .chunking }
 
-                let system = """
-                    You are a personal knowledge management assistant. \
-                    Extract the core knowledge units from the provided text \
-                    and return ONLY valid JSON — no markdown, no explanation. \
-                    Respond in the same language as the input text.
-                    """
+                let system = PromptStore.shared.prompt(for: .nodeExtractionAPI)
                 let userMsg = """
                     Text to analyse:
                     ---
@@ -818,13 +894,7 @@ final class GraphViewModel {
 
         Task {
             do {
-                let instructions = """
-                    You are a personal knowledge management assistant. \
-                    Extract the core knowledge units from the provided text \
-                    and return them as structured node data. \
-                    Respond in the same language as the input text.
-                    """
-                let session = LanguageModelSession(instructions: instructions)
+                let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .nodeExtractionApple))
                 let userText = text.prefix(2000).description
                 let prompt = """
                     Text to analyse:
@@ -918,7 +988,11 @@ final class GraphViewModel {
         let baseAngle = Double.random(in: 0..<(2 * .pi))
         let radius: CGFloat = 200
 
-        let assignedPersonaIDs: [String] = [modalSelectedPersonaID].compactMap { $0 }
+        // Manual selection takes priority; fall back to active persona, then first available.
+        let resolvedPersonaID: String? = modalSelectedPersonaID
+            ?? activePersona?.id
+            ?? personas.first?.id
+        let assignedPersonaIDs: [String] = resolvedPersonaID.map { [$0] } ?? []
 
         let nodesToAdd: [GraphNode]
         if modalAnalysedNodes.isEmpty {
@@ -963,6 +1037,9 @@ final class GraphViewModel {
             }
         }
 
+        // Capture snapshot of existing nodes BEFORE inserting new ones (Task 13)
+        let existingSnapshot = nodes
+
         // Add nodes and auto-connect them in sequence if more than one
         nodes.append(contentsOf: nodesToAdd)
         if nodesToAdd.count > 1 {
@@ -971,11 +1048,15 @@ final class GraphViewModel {
                     id: "e\(nodesToAdd[i].id)-\(nodesToAdd[i+1].id)",
                     sourceID: nodesToAdd[i].id,
                     targetID: nodesToAdd[i+1].id,
+                    relationship: "관련",
                     style: EdgeStyle(strokeWidth: 1.5, animated: true, isUserCreated: true)
                 )
                 edges.append(edge)
             }
         }
+
+        // Auto-link new nodes to related existing nodes by tag overlap (Task 13)
+        autoLinkToExisting(newNodes: nodesToAdd, existingNodes: existingSnapshot)
 
         persistGraph()
         isAddModalPresented = false
@@ -1152,13 +1233,7 @@ final class GraphViewModel {
         aiGeneratedPrompt = ""
         aiPromptError = nil
 
-        let instructions = """
-            You are a personal knowledge management assistant. \
-            Given a knowledge node, write a concise, insightful prompt \
-            that helps the user explore, extend, or apply the knowledge. \
-            Respond in the same language as the node content. \
-            Keep it under 150 words.
-            """
+        let instructions = PromptStore.shared.prompt(for: .singleNodePrompt)
         let userPrompt = """
             노드 제목: \(node.title)
             요약: \(node.summary)
@@ -1234,14 +1309,7 @@ final class GraphViewModel {
             ? "(연결된 노드 없음)"
             : neighbours.map { "  - [\($0.type.rawValue)] \($0.title): \($0.summary)" }.joined(separator: "\n")
 
-        let instructions = """
-            You are a personal knowledge management assistant. \
-            Given a central knowledge node and its connected neighbour nodes, \
-            synthesise the relationships and produce an insightful analysis \
-            prompt that explores their connections, contradictions, or synergies. \
-            Respond in the same language as the node content. \
-            Keep it under 250 words.
-            """
+        let instructions = PromptStore.shared.prompt(for: .connectedNodePrompt)
         let userPrompt = """
             [중심 노드]
             제목: \(node.title)
@@ -1476,9 +1544,11 @@ final class GraphViewModel {
         guard !initialQuery.isEmpty else { return }
         // Pre-populate persona suggestions using keyword fallback (sync, no await needed)
         let suggested = PersonaRouter.shared.keywordRoute(query: initialQuery)
-        let available = Set(personas.compactMap { $0.personaType })
-        chatSelectedPersonaTypes = Set(suggested.filter { available.contains($0) })
-        suggestedPersonas = Array(chatSelectedPersonaTypes)
+        let autoSelected = personas.filter { p in
+            p.personaType.map { suggested.contains($0) } ?? false
+        }
+        chatSelectedPersonaIDs = Set(autoSelected.map { $0.id })
+        suggestedPersonas = suggested.filter { t in personas.contains { $0.personaType == t } }
     }
 
     /// Create a new ChatSession, send the user's query, then collect one response
@@ -1488,7 +1558,8 @@ final class GraphViewModel {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isChatLoading else { return }
 
-        let selectedTypes = Array(chatSelectedPersonaTypes)
+        let selectedPersonas = personas.filter { chatSelectedPersonaIDs.contains($0.id) }
+        let selectedTypes = Array(Set(selectedPersonas.compactMap { $0.personaType }))
         guard !selectedTypes.isEmpty else {
             chatError = "최소 한 개의 페르소나를 선택하세요."
             return
@@ -1570,8 +1641,10 @@ final class GraphViewModel {
             }.joined(separator: "\n")
         }
 
-        // Generate each persona's response — task group returns Sendable DTOs
-        let responses: [PersonaResponseDTO] = await withTaskGroup(of: PersonaResponseDTO?.self) { group in
+        let order = personaTypes.map { $0.rawValue }
+
+        // Round 1: each persona responds independently in parallel
+        let round1: [PersonaResponseDTO] = await withTaskGroup(of: PersonaResponseDTO?.self) { group in
             for pType in personaTypes {
                 group.addTask {
                     await self.generateResponse(for: pType, query: query, history: historyText)
@@ -1584,10 +1657,9 @@ final class GraphViewModel {
             return results
         }
 
-        // Create ChatMessage objects and persist — all on the main actor
+        // Persist Round 1 messages on the main actor
         await MainActor.run {
-            let order = personaTypes.map { $0.rawValue }
-            let sorted = responses.sorted {
+            let sorted = round1.sorted {
                 (order.firstIndex(of: $0.personaTypeRaw) ?? 99) <
                 (order.firstIndex(of: $1.personaTypeRaw) ?? 99)
             }
@@ -1601,8 +1673,88 @@ final class GraphViewModel {
                 modelContext.insert(msg)
                 chatMessages.append(msg)
             }
-            isChatLoading = false
             try? modelContext.save()
+        }
+
+        // Round 2: each persona cross-responds to the other personas' Round 1 answers
+        // Only meaningful when 2+ personas are participating
+        if personaTypes.count >= 2 {
+            let round2: [PersonaResponseDTO] = await withTaskGroup(of: PersonaResponseDTO?.self) { group in
+                for pType in personaTypes {
+                    let othersContext = round1
+                        .filter { $0.personaTypeRaw != pType.rawValue }
+                        .compactMap { dto -> String? in
+                            guard let otherType = PersonaType(rawValue: dto.personaTypeRaw) else { return nil }
+                            return "[\(otherType.localizedName)] \(dto.content)"
+                        }
+                        .joined(separator: "\n\n")
+                    guard !othersContext.isEmpty else { continue }
+                    group.addTask {
+                        await self.generateCrossResponse(for: pType, query: query, othersContext: othersContext)
+                    }
+                }
+                var results: [PersonaResponseDTO] = []
+                for await dto in group {
+                    if let dto { results.append(dto) }
+                }
+                return results
+            }
+
+            await MainActor.run {
+                let sorted = round2.sorted {
+                    (order.firstIndex(of: $0.personaTypeRaw) ?? 99) <
+                    (order.firstIndex(of: $1.personaTypeRaw) ?? 99)
+                }
+                for dto in sorted {
+                    let msg = ChatMessage(
+                        role: ChatRole.persona,
+                        personaTypeRaw: dto.personaTypeRaw,
+                        content: dto.content
+                    )
+                    msg.session = session
+                    modelContext.insert(msg)
+                    chatMessages.append(msg)
+                }
+                isChatLoading = false
+                try? modelContext.save()
+            }
+        } else {
+            await MainActor.run {
+                isChatLoading = false
+                try? modelContext.save()
+            }
+        }
+    }
+
+    private func generateCrossResponse(
+        for personaType: PersonaType,
+        query: String,
+        othersContext: String
+    ) async -> PersonaResponseDTO? {
+        let nodeContext = await MainActor.run { buildNodeContext(for: personaType) }
+        let crossSuffix = PromptStore.shared.prompt(for: .personaCrossResponse,
+                                                     replacing: "personaName",
+                                                     with: personaType.localizedName)
+        let systemPrompt = """
+            \(personaType.systemPromptContext)
+
+            \(crossSuffix)\(nodeContext.isEmpty ? "" : "\n\n[관련 데이터]\n\(nodeContext)")
+            """
+        let userMessage = """
+            [원래 질문] \(query)
+
+            [다른 관점들의 의견]
+            \(othersContext)
+            """
+        do {
+            let content = try await AIProviderManager.shared.callAI(
+                system: systemPrompt,
+                userMessage: userMessage,
+                maxTokens: 300
+            )
+            return PersonaResponseDTO(personaTypeRaw: personaType.rawValue, content: content)
+        } catch {
+            return nil  // silently skip cross-response on error
         }
     }
 
@@ -1614,14 +1766,13 @@ final class GraphViewModel {
         // Collect relevant node context for this persona
         let nodeContext = await MainActor.run { buildNodeContext(for: personaType) }
 
+        let chatSuffix = PromptStore.shared.prompt(for: .personaChatSuffix,
+                                                    replacing: "personaName",
+                                                    with: personaType.localizedName)
         let systemPrompt = """
             \(personaType.systemPromptContext)
 
-            당신은 '\(personaType.localizedName)' 페르소나입니다.
-            사용자의 고민에 대해 이 페르소나의 관점에서 구체적이고 실질적인 조언을 한국어로 제공하세요.
-            다른 페르소나가 있다는 사실을 언급하지 마세요. 오직 이 관점에서만 답변하세요.
-            응답은 3~5문장 이내로 간결하게 작성하세요.
-            \(nodeContext.isEmpty ? "" : "\n[관련 데이터]\n\(nodeContext)")
+            \(chatSuffix)\(nodeContext.isEmpty ? "" : "\n\n[관련 데이터]\n\(nodeContext)")
             """
 
         let userMessage = history.isEmpty
@@ -1682,7 +1833,7 @@ final class GraphViewModel {
         isChatPresented = false
         activeChatSession = nil
         chatMessages = []
-        chatSelectedPersonaTypes = []
+        chatSelectedPersonaIDs = []
         suggestedPersonas = []
         chatError = nil
         isChatLoading = false

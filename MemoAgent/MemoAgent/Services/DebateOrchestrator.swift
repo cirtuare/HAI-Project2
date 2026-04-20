@@ -85,52 +85,16 @@ private enum SpecialistRole: String {
 
     var systemPrompt: String {
         switch self {
-        case .health:
-            return """
-            당신은 건강 및 웰니스 전문 분석가입니다. 제공된 건강 데이터 요약을 분석하여 \
-            패턴, 위험 요소, 근본 원인을 구체적으로 파악합니다.
-            단순 나열이 아닌 인과관계와 메커니즘을 설명하세요. 가설을 명확히 진술하세요.
-            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.82
-            """
-        case .work:
-            return """
-            당신은 생산성 및 업무 관리 전문 분석가입니다. 제공된 태스크/일정 데이터 요약을 분석하여 \
-            패턴, 병목점, 근본 원인을 구체적으로 파악합니다.
-            단순 나열이 아닌 인과관계와 메커니즘을 설명하세요. 가설을 명확히 진술하세요.
-            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.79
-            """
-        case .finance:
-            return """
-            당신은 개인 재무 전문 분석가입니다. 제공된 지출 패턴과 재무 데이터를 분석하여 \
-            재무 건전성, 위험 요소, 개선 기회를 파악합니다.
-            감정적 지출과 이성적 지출의 차이, 현금흐름 패턴에 주목하세요.
-            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.80
-            """
-        case .hobby:
-            return """
-            당신은 라이프스타일과 취미 활동 전문 분석가입니다. 제공된 활동 데이터를 분석하여 \
-            삶의 균형, 열정 지수, 번아웃 위험을 파악합니다.
-            창의적 활동과 회복 활동의 균형, 몰입 패턴에 주목하세요.
-            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.76
-            """
-        case .academic:
-            return """
-            당신은 학습 및 지식 관리 전문 분석가입니다. 제공된 학습 패턴과 지식 기록을 분석하여 \
-            학습 효율, 기억 유지율, 개념 연결성을 파악합니다.
-            능동적 회상과 분산 학습의 효과, 지식 간 연결 패턴에 주목하세요.
-            응답 마지막 줄에 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.81
-            """
+        case .health:   return PromptStore.shared.prompt(for: .debateSpecialistHealth)
+        case .work:     return PromptStore.shared.prompt(for: .debateSpecialistWork)
+        case .finance:  return PromptStore.shared.prompt(for: .debateSpecialistFinance)
+        case .hobby:    return PromptStore.shared.prompt(for: .debateSpecialistHobby)
+        case .academic: return PromptStore.shared.prompt(for: .debateSpecialistAcademic)
         }
     }
 
     var rebuttalPrompt: String {
-        return """
-        당신은 \(domainLabel) 분석 전문가입니다. 상대 에이전트의 분석을 검토하고 \
-        반드시 최소 하나 이상의 구체적인 반론 또는 보완점을 제시하세요.
-        모든 내용에 동의하더라도 놓친 한계점이나 대안 해석을 찾아야 합니다.
-        인과관계 방향이나 타이밍에 특히 주목하세요.
-        응답 마지막 줄에 수정된 신뢰도를 표시하세요. 형식 예시: CONFIDENCE: 0.88
-        """
+        PromptStore.shared.prompt(for: .debateRebuttalTemplate, replacing: "domainLabel", with: domainLabel)
     }
 }
 
@@ -402,11 +366,7 @@ actor DebateOrchestrator {
 
         if case .available = model.availability {
             // Sensitive cross-domain synthesis stays on-device
-            let instructions = """
-            당신은 멀티 에이전트 토론 종합 분석가입니다. 건강 AI와 업무 AI의 토론을 바탕으로 \
-            근본 원인, 우선순위 행동 계획(정확히 3개), 긴급도를 도출합니다. 한국어로 응답하세요.
-            """
-            let session = LanguageModelSession(instructions: instructions)
+            let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .debateSynthesisApple))
             let response = try await session.respond(
                 to: "토론 요약:\n\(compressed)\n\n위 토론을 종합하여 핵심 원인과 행동 계획을 도출하세요.",
                 generating: DebateSynthesisResult.self
@@ -416,13 +376,8 @@ actor DebateOrchestrator {
             synthesisText = encodeToJSON(result)
         } else {
             // API fallback: ask for JSON output
-            let instructions = """
-            당신은 멀티 에이전트 토론 종합 분석가입니다.
-            반드시 다음 JSON 형식만 출력하세요:
-            {"rootCause": "근본 원인 2-3문장", "actions": ["행동1", "행동2", "행동3"], "urgency": "immediate|soon|monitor"}
-            """
             synthesisText = try await callBestProvider(
-                system: instructions,
+                system: PromptStore.shared.prompt(for: .debateSynthesisAPI),
                 userMessage: "토론 요약:\n\(compressed)\n\nJSON으로 종합 분석하세요."
             )
         }

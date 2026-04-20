@@ -360,11 +360,7 @@ actor NodeManagerAgent {
         let model = SystemLanguageModel.default
         if case .available = model.availability {
             do {
-                let session = LanguageModelSession(instructions: """
-                    You are a knowledge clustering assistant.
-                    Given a list of related knowledge nodes, produce a concise cluster title (max 8 words)
-                    and a 1-sentence summary. Respond in the same language as the input.
-                    """)
+                let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .clusterApple))
                 let response = try await session.respond(
                     to: "Nodes:\n- \(titles)\n\nSummaries: \(summaryText.prefix(400))",
                     generating: ClusterResult.self
@@ -378,7 +374,7 @@ actor NodeManagerAgent {
         } else if currentProvider != .appleIntelligence {
             do {
                 let response = try await AIProviderManager.shared.callAI(
-                    system: "You are a knowledge clustering assistant. Respond in the same language as the input.",
+                    system: PromptStore.shared.prompt(for: .clusterAPI),
                     userMessage: "Nodes:\n- \(titles)\n\nCreate a JSON: {\"title\": \"...\", \"summary\": \"...\"}",
                     maxTokens: 150
                 )

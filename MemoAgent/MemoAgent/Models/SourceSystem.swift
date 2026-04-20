@@ -99,16 +99,11 @@ enum PersonaType: String, CaseIterable, Codable {
     /// System prompt context injected into AI calls for this persona.
     var systemPromptContext: String {
         switch self {
-        case .health:
-            return "You are managing a personal health knowledge base. Focus on health trends, wellness insights, sleep patterns, exercise data, and screen time habits. Be cautious and recommend consulting healthcare professionals when appropriate."
-        case .academic:
-            return "You are managing an academic knowledge base. Focus on concepts, citations, research methodology, and learning connections. Use precise academic language."
-        case .finance:
-            return "You are managing a personal finance knowledge base. Focus on spending patterns, budget analysis, and financial insights. Be objective and data-driven."
-        case .hobby:
-            return "You are managing a personal hobby and lifestyle space. Focus on creative connections, memorable experiences, personal growth, and leisure activities. Be empathetic and reflective."
-        case .other:
-            return "You are managing a general-purpose knowledge base. Adapt your tone and focus to the content provided, helping the user organize and connect information across diverse topics."
+        case .health:   return PromptStore.shared.prompt(for: .personaContextHealth)
+        case .academic: return PromptStore.shared.prompt(for: .personaContextAcademic)
+        case .finance:  return PromptStore.shared.prompt(for: .personaContextFinance)
+        case .hobby:    return PromptStore.shared.prompt(for: .personaContextHobby)
+        case .other:    return PromptStore.shared.prompt(for: .personaContextOther)
         }
     }
 

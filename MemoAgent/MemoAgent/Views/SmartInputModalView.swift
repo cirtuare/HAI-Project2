@@ -13,7 +13,6 @@ import SwiftData
 
 struct SmartInputModalView: View {
     @Environment(GraphViewModel.self) private var vm
-    @Environment(\.dismiss) private var dismiss
 
     var availableWidth: CGFloat = 860
 
@@ -73,7 +72,6 @@ struct SmartInputModalView: View {
             }
             Spacer()
             Button {
-                dismiss()
                 vm.isAddModalPresented = false
             } label: {
                 Image(systemName: "xmark")
