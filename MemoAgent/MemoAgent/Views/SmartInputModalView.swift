@@ -15,28 +15,29 @@ struct SmartInputModalView: View {
     @Environment(GraphViewModel.self) private var vm
     @Environment(\.dismiss) private var dismiss
 
+    var availableWidth: CGFloat = 860
+
+    private var isNarrow: Bool { availableWidth < 750 }
+
     var body: some View {
-        GeometryReader { geo in
-            let isNarrow = geo.size.width < 750
-            VStack(spacing: 0) {
-                modalHeader
-                Divider()
-                if isNarrow {
-                    VStack(spacing: 0) {
-                        inputColumn
-                            .frame(maxWidth: .infinity)
-                        Divider()
-                        processingColumn
-                            .frame(maxWidth: .infinity, maxHeight: 220)
-                    }
-                } else {
-                    HStack(spacing: 0) {
-                        inputColumn
-                            .frame(maxWidth: .infinity)
-                        Divider()
-                        processingColumn
-                            .frame(maxWidth: .infinity)
-                    }
+        VStack(spacing: 0) {
+            modalHeader
+            Divider()
+            if isNarrow {
+                VStack(spacing: 0) {
+                    inputColumn
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    processingColumn
+                        .frame(maxWidth: .infinity, maxHeight: 220)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    inputColumn
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    processingColumn
+                        .frame(maxWidth: .infinity)
                 }
             }
         }

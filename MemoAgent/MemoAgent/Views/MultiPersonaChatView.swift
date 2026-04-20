@@ -12,16 +12,28 @@ struct MultiPersonaChatView: View {
     @Environment(GraphViewModel.self) private var vm
     @Environment(\.modelContext) private var modelContext
 
+    var availableWidth: CGFloat = 780
+
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
 
+    private var isNarrow: Bool { availableWidth < 680 }
+
     var body: some View {
-        GeometryReader { geo in
-            HStack(spacing: 0) {
-                personaPanel
-                    .frame(width: geo.size.width < 680 ? 160 : 220)
-                Divider()
-                chatPanel
+        Group {
+            if isNarrow {
+                VStack(spacing: 0) {
+                    personaRowHeader
+                    Divider()
+                    chatPanel
+                }
+            } else {
+                HStack(spacing: 0) {
+                    personaPanel
+                        .frame(width: 220)
+                    Divider()
+                    chatPanel
+                }
             }
         }
         .frame(minWidth: 620, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
@@ -38,6 +50,82 @@ struct MultiPersonaChatView: View {
     // ─────────────────────────────────────────────
     // MARK: Left — Persona Panel
     // ─────────────────────────────────────────────
+
+    // 좁은 레이아웃: 페르소나 칩을 상단 가로 행으로 표시
+    private var personaRowHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.cyan)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(vm.personas, id: \.id) { persona in
+                        if let pType = persona.personaType {
+                            personaChip(persona: persona, personaType: pType)
+                        }
+                    }
+                    if vm.chatSelectedPersonaTypes.count >= 2 {
+                        Button {
+                            triggerDebate()
+                        } label: {
+                            Text("토론")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color.orange))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+
+            Spacer(minLength: 0)
+
+            Button { vm.closeChat() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(Color.primary.opacity(0.07)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color(hex: "#0f172a").opacity(0.6))
+    }
+
+    private func personaChip(persona: PersonaRecord, personaType: PersonaType) -> some View {
+        let isSelected = vm.chatSelectedPersonaTypes.contains(personaType)
+        let accent = Color(hex: personaType.accentHex)
+        return Button {
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                if isSelected { vm.chatSelectedPersonaTypes.remove(personaType) }
+                else { vm.chatSelectedPersonaTypes.insert(personaType) }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: personaType.icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isSelected ? accent : Color.white.opacity(0.4))
+                Text(personaType.localizedName)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.5))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(isSelected ? accent.opacity(0.15) : Color.white.opacity(0.06))
+                    .overlay(Capsule().strokeBorder(isSelected ? accent.opacity(0.4) : Color.clear, lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
+    }
 
     private var personaPanel: some View {
         VStack(alignment: .leading, spacing: 0) {

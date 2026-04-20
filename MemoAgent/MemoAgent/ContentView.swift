@@ -78,7 +78,7 @@ struct ContentView: View {
         }
         .overlay {
             if vm.isAddModalPresented {
-                SmartInputModalView()
+                SmartInputModalView(availableWidth: windowSize.width * 0.92)
                     .environment(vm)
                     .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
@@ -87,7 +87,7 @@ struct ContentView: View {
         }
         .overlay {
             if vm.isChatPresented {
-                MultiPersonaChatView()
+                MultiPersonaChatView(availableWidth: windowSize.width * 0.92)
                     .environment(vm)
                     .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
