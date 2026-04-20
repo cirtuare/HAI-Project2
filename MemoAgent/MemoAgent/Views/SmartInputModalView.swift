@@ -27,7 +27,7 @@ struct SmartInputModalView: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .frame(width: 860, height: 560)
+        .frame(minWidth: 680, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))  // surface-elevated
         .colorScheme(.dark)  // force dark so .primary/.secondary resolve to white-family
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -542,8 +542,7 @@ struct SmartInputModalView: View {
                     ProgressSpinner()
                     Text("AI 분석 중...")
                 } else {
-                    Text("분석 시작")
-                    Image(systemName: "arrow.right")
+                    Text("🫷 고민 전가하기")
                 }
             }
             .font(.system(size: 14, weight: .semibold))
