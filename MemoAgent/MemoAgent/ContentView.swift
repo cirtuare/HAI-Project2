@@ -12,6 +12,7 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(GraphViewModel.self) private var vm
+    @State private var windowSize: CGSize = CGSize(width: 1200, height: 800)
 
     @ViewBuilder
     private var mainContent: some View {
@@ -40,6 +41,13 @@ struct ContentView: View {
                         .inspectorColumnWidth(min: 300, ideal: 360, max: 420)
                 }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { windowSize = geo.size }
+                    .onChange(of: geo.size) { _, new in windowSize = new }
+            }
+        )
         .toolbar {
             NodeMindToolbar()
         }
@@ -50,6 +58,7 @@ struct ContentView: View {
         )) {
             SmartInputModalView()
                 .environment(vm)
+                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
         }
         // AI Settings sheet
         .sheet(isPresented: Binding(
@@ -57,6 +66,7 @@ struct ContentView: View {
             set: { vm.isSettingsPresented = $0 }
         )) {
             SettingsView()
+                .frame(maxWidth: windowSize.width * 0.92)
         }
         // Multi-Persona Chat sheet
         .sheet(isPresented: Binding(
@@ -65,6 +75,7 @@ struct ContentView: View {
         )) {
             MultiPersonaChatView()
                 .environment(vm)
+                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
         }
         // Single-Persona Chat sheet
         .sheet(isPresented: Binding(
@@ -73,6 +84,7 @@ struct ContentView: View {
         )) {
             SinglePersonaChatView()
                 .environment(vm)
+                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
         }
         // Live Debate visualization sheet
         .sheet(isPresented: Binding(
@@ -81,6 +93,7 @@ struct ContentView: View {
         )) {
             LiveDebateView()
                 .environment(vm)
+                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
         }
         // Debate result panel — slides in from bottom-right when synthesis completes
         .overlay(alignment: .bottomTrailing) {
