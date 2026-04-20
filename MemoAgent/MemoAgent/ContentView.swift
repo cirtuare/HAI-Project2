@@ -51,16 +51,7 @@ struct ContentView: View {
         .toolbar {
             NodeMindToolbar()
         }
-        // SmartInput modal — presented as a borderless floating sheet
-        .sheet(isPresented: Binding(
-            get: { vm.isAddModalPresented },
-            set: { if !$0 { vm.isAddModalPresented = false } }
-        )) {
-            SmartInputModalView()
-                .environment(vm)
-                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
-        }
-        // AI Settings sheet
+        // AI Settings sheet (system sheet — settings doesn't need tap-to-dismiss)
         .sheet(isPresented: Binding(
             get: { vm.isSettingsPresented },
             set: { vm.isSettingsPresented = $0 }
@@ -68,32 +59,58 @@ struct ContentView: View {
             SettingsView()
                 .frame(maxWidth: windowSize.width * 0.92)
         }
-        // Multi-Persona Chat sheet
-        .sheet(isPresented: Binding(
-            get: { vm.isChatPresented },
-            set: { if !$0 { vm.closeChat() } }
-        )) {
-            MultiPersonaChatView()
-                .environment(vm)
-                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+        // Tap-to-dismiss overlay modals
+        .overlay {
+            if vm.isAddModalPresented || vm.isChatPresented || vm.isSingleChatPresented || vm.isLiveDebatePresented {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if vm.isAddModalPresented { vm.isAddModalPresented = false }
+                            if vm.isChatPresented { vm.closeChat() }
+                            if vm.isSingleChatPresented { vm.closeSingleChat() }
+                            if vm.isLiveDebatePresented { vm.isLiveDebatePresented = false }
+                        }
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: vm.isAddModalPresented)
+            }
         }
-        // Single-Persona Chat sheet
-        .sheet(isPresented: Binding(
-            get: { vm.isSingleChatPresented },
-            set: { if !$0 { vm.closeSingleChat() } }
-        )) {
-            SinglePersonaChatView()
-                .environment(vm)
-                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+        .overlay {
+            if vm.isAddModalPresented {
+                SmartInputModalView()
+                    .environment(vm)
+                    .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.isAddModalPresented)
+            }
         }
-        // Live Debate visualization sheet
-        .sheet(isPresented: Binding(
-            get: { vm.isLiveDebatePresented },
-            set: { vm.isLiveDebatePresented = $0 }
-        )) {
-            LiveDebateView()
-                .environment(vm)
-                .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+        .overlay {
+            if vm.isChatPresented {
+                MultiPersonaChatView()
+                    .environment(vm)
+                    .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.isChatPresented)
+            }
+        }
+        .overlay {
+            if vm.isSingleChatPresented {
+                SinglePersonaChatView()
+                    .environment(vm)
+                    .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.isSingleChatPresented)
+            }
+        }
+        .overlay {
+            if vm.isLiveDebatePresented {
+                LiveDebateView()
+                    .environment(vm)
+                    .frame(maxWidth: windowSize.width * 0.92, maxHeight: windowSize.height * 0.88)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.isLiveDebatePresented)
+            }
         }
         // Debate result panel — slides in from bottom-right when synthesis completes
         .overlay(alignment: .bottomTrailing) {
