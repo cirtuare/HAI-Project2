@@ -53,23 +53,23 @@ enum ProcessStep: Int {
 /// @Generable 매크로로 FoundationModels의 guided generation을 활성화합니다.
 @Generable
 struct ExtractedNodeData {
-    @Guide(description: "The title of this knowledge node, concise (5–15 words)")
+    @Guide(description: "The name of the entity itself — a person, object, place, or concept (1–4 words). NOT a descriptive phrase. Examples: '홍길동', 'Pikachu', 'Harvard University', '포켓몬스터'")
     var title: String
 
-    @Guide(description: "A 1-2 sentence summary of the key insight in this node")
+    @Guide(description: "A 1-2 sentence description of who or what this entity is, based on the input text")
     var summary: String
 
-    @Guide(description: "2-4 relevant keyword tags, no # prefix, comma-separated concepts")
+    @Guide(description: "2-4 relevant keyword tags, no # prefix, comma-separated")
     var tags: String   // comma-separated; split on commit
 
-    @Guide(description: "true if this node contains especially important or insightful content")
+    @Guide(description: "true if this entity is especially central or important in the text")
     var isImportant: Bool
 }
 
 /// A collection of extracted nodes from a single piece of text.
 @Generable
 struct ExtractedKnowledgeGraph {
-    @Guide(description: "List of distinct knowledge nodes extracted from the input text. Extract at most 3 nodes. Aim for 1–3 concise nodes.")
+    @Guide(description: "List of distinct entities (people, objects, places, concepts) found in the input. Each entity becomes one node. Extract at most 3. Do NOT create nodes for relationships or descriptions — only for the subjects themselves.")
     var nodes: [ExtractedNodeData]
 }
 
@@ -593,6 +593,21 @@ final class GraphViewModel {
 
     /// Links each new node to up to 2 existing nodes that share the most tags.
     /// Uses the first shared tag as a heuristic relationship label.
+    /// Resolves the persona IDs to assign to a newly created node.
+    /// - `""` (explicit "없음") → empty array
+    /// - specific ID → that persona
+    /// - `nil` ("자동 배정") → keyword-routes `text` to best-matching persona type;
+    ///   falls back to active persona then first available
+    private func resolvePersonaIDs(for text: String) -> [String] {
+        if modalSelectedPersonaID == "" { return [] }
+        if let specific = modalSelectedPersonaID { return [specific] }
+        let matched = PersonaRouter.shared.keywordRoute(query: text).first
+        let id = matched.flatMap { type in personas.first(where: { $0.personaType == type }) }?.id
+            ?? activePersona?.id
+            ?? personas.first?.id
+        return id.map { [$0] } ?? []
+    }
+
     private func autoLinkToExisting(newNodes: [GraphNode], existingNodes: [GraphNode]) {
         for newNode in newNodes {
             guard !newNode.tags.isEmpty else { continue }
@@ -622,6 +637,7 @@ final class GraphViewModel {
                     relationship: label,
                     style: EdgeStyle(strokeWidth: 1, animated: false, isUserCreated: false)
                 ))
+                generateEdgeRelationship(edgeID: edgeID)
             }
         }
     }
@@ -706,6 +722,26 @@ final class GraphViewModel {
         edges.removeAll { $0.sourceID == id || $0.targetID == id }
         selectedNodeIDs.remove(id)
         if selectedNodeIDs.isEmpty { isInspectorPresented = false }
+        persistGraph()
+    }
+
+    /// Delete all currently selected nodes and their edges.
+    func deleteSelectedNodes() {
+        let ids = selectedNodeIDs
+        nodes.removeAll { ids.contains($0.id) }
+        edges.removeAll { ids.contains($0.sourceID) || ids.contains($0.targetID) }
+        selectedNodeIDs.removeAll()
+        isInspectorPresented = false
+        persistGraph()
+    }
+
+    /// Replace the persona assignment for all currently selected nodes.
+    func assignPersonaToSelected(_ personaID: String?) {
+        for idx in nodes.indices where selectedNodeIDs.contains(nodes[idx].id) {
+            var updated = nodes[idx]
+            updated.personaIDs = [personaID].compactMap { $0 }
+            nodes[idx] = updated
+        }
         persistGraph()
     }
 
@@ -841,12 +877,23 @@ final class GraphViewModel {
 
                 let system = PromptStore.shared.prompt(for: .nodeExtractionAPI)
                 let userMsg = """
-                    Text to analyse:
+                    Extract the distinct entities (people, objects, places, or key concepts) from the text below as individual knowledge nodes. Each node title must be the entity name itself — NOT a descriptive phrase.
+
+                    EXAMPLE INPUT:
+                    홍길동은 내 대학 동기이다. 홍길동은 다른 대학 동기인 김영희와 애인 관계이다. 홍길동은 포켓몬스터를 좋아한다.
+
+                    EXAMPLE OUTPUT:
+                    {"nodes":[
+                      {"title":"홍길동","summary":"내 대학 동기. 김영희와 애인 관계이며 포켓몬스터를 좋아함.","tags":"인간관계, 대학","isImportant":true},
+                      {"title":"김영희","summary":"홍길동의 대학 동기이자 애인.","tags":"인간관계, 대학","isImportant":false},
+                      {"title":"포켓몬스터","summary":"홍길동이 좋아하는 취미.","tags":"취미, 게임","isImportant":false}
+                    ]}
+
+                    TEXT TO ANALYSE:
                     ---
                     \(text.prefix(2000))
                     ---
-                    Extract at most 3 distinct knowledge nodes. Return ONLY this JSON structure:
-                    {"nodes":[{"title":"concise title 5-15 words","summary":"1-2 sentence summary","tags":"tag1, tag2","isImportant":false}]}
+                    Return ONLY valid JSON in the exact same structure as the example above. At most 3 nodes.
                     """
 
                 let json = try await AIProviderManager.shared.callAI(
@@ -897,11 +944,15 @@ final class GraphViewModel {
                 let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .nodeExtractionApple))
                 let userText = text.prefix(2000).description
                 let prompt = """
+                    Extract the distinct entities (people, objects, places, key concepts) from the text below. Each entity becomes one node. The node title must be the entity name itself — NOT a description or phrase.
+
+                    Example — Input: "홍길동은 내 대학 동기이다. 김영희와 애인 관계이며 포켓몬스터를 좋아한다."
+                    Example — Nodes: ["홍길동", "김영희", "포켓몬스터"]
+
                     Text to analyse:
                     ---
                     \(userText)
                     ---
-                    Extract all distinct knowledge nodes from the text above.
                     """
 
                 try await Task.sleep(for: .milliseconds(400))
@@ -984,19 +1035,20 @@ final class GraphViewModel {
         let vcx = -canvasOffset.width  / canvasScale
         let vcy = -canvasOffset.height / canvasScale
 
-        // Spiral layout: place nodes clustered around the viewport centre
+        // Spread new nodes in a circle of radius 220 around viewport centre
         let baseAngle = Double.random(in: 0..<(2 * .pi))
-        let radius: CGFloat = 200
+        let radius: CGFloat = 220
 
-        // Manual selection takes priority; fall back to active persona, then first available.
-        let resolvedPersonaID: String? = modalSelectedPersonaID
-            ?? activePersona?.id
-            ?? personas.first?.id
-        let assignedPersonaIDs: [String] = resolvedPersonaID.map { [$0] } ?? []
+        // Collect existing node positions to avoid overlap
+        var occupiedPositions = nodes.map(\.position)
 
         let nodesToAdd: [GraphNode]
         if modalAnalysedNodes.isEmpty {
-            // Plain fallback: one node from title+body, placed at viewport centre
+            let pos = nonOverlappingPosition(
+                near: CGPoint(x: vcx, y: vcy),
+                occupied: occupiedPositions
+            )
+            occupiedPositions.append(pos)
             nodesToAdd = [GraphNode(
                 id: UUID().uuidString,
                 title: modalTitleInput.isEmpty ? "새 노드" : modalTitleInput,
@@ -1006,23 +1058,26 @@ final class GraphViewModel {
                 originalText: bodyText,
                 isImportant: false,
                 tags: [],
-                position: CGPoint(x: vcx, y: vcy),
-                personaIDs: assignedPersonaIDs
+                position: pos,
+                personaIDs: resolvePersonaIDs(for: "\(modalTitleInput) \(bodyText)")
             )]
         } else {
-            nodesToAdd = modalAnalysedNodes.enumerated().map { idx, extracted in
+            var result: [GraphNode] = []
+            for (idx, extracted) in modalAnalysedNodes.enumerated() {
                 let count = modalAnalysedNodes.count
                 let angle = baseAngle + Double(idx) * (2 * .pi / Double(max(count, 1)))
-                // Single node: place exactly at viewport centre; multiple: spread in circle
                 let offsetX = count == 1 ? 0 : cos(angle) * radius
                 let offsetY = count == 1 ? 0 : sin(angle) * radius
+                let candidate = CGPoint(x: vcx + offsetX, y: vcy + offsetY)
+                let pos = nonOverlappingPosition(near: candidate, occupied: occupiedPositions)
+                occupiedPositions.append(pos)
 
                 let tagList = extracted.tags
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
 
-                return GraphNode(
+                result.append(GraphNode(
                     id: UUID().uuidString,
                     title: extracted.title,
                     summary: extracted.summary,
@@ -1031,32 +1086,73 @@ final class GraphViewModel {
                     originalText: bodyText,
                     isImportant: extracted.isImportant,
                     tags: tagList,
-                    position: CGPoint(x: vcx + offsetX, y: vcy + offsetY),
-                    personaIDs: assignedPersonaIDs
-                )
+                    position: pos,
+                    personaIDs: resolvePersonaIDs(for: "\(extracted.title) \(extracted.summary) \(extracted.tags)")
+                ))
+            }
+            nodesToAdd = result
+        }
+
+        // ── Task 25: Deduplicate against existing nodes ──────────────────────
+        // For each candidate whose title matches an existing node, merge its
+        // content into the existing node (Task 24) instead of creating a duplicate.
+        var idRemap: [String: String] = [:]   // candidateID → existingID
+        var trulyNewNodes: [GraphNode] = []
+
+        for candidate in nodesToAdd {
+            let key = candidate.title.lowercased().trimmingCharacters(in: .whitespaces)
+            if let existingIdx = nodes.firstIndex(where: {
+                $0.title.lowercased().trimmingCharacters(in: .whitespaces) == key
+            }) {
+                idRemap[candidate.id] = nodes[existingIdx].id
+                // Task 24: append new summary / tags to existing node
+                var merged = nodes[existingIdx]
+                if !candidate.summary.isEmpty && !merged.summary.contains(candidate.summary) {
+                    merged.summary += "\n" + candidate.summary
+                }
+                let addTags = candidate.tags.filter { !merged.tags.contains($0) }
+                merged.tags += addTags
+                nodes[existingIdx] = merged
+            } else {
+                trulyNewNodes.append(candidate)
             }
         }
 
-        // Capture snapshot of existing nodes BEFORE inserting new ones (Task 13)
+        // Helper: resolve a node ID through the dedup remap table
+        func effectiveID(_ id: String) -> String { idRemap[id] ?? id }
+
+        // Capture snapshot BEFORE inserting truly new nodes
         let existingSnapshot = nodes
 
-        // Add nodes and auto-connect them in sequence if more than one
-        nodes.append(contentsOf: nodesToAdd)
+        // Add only nodes that don't already exist
+        nodes.append(contentsOf: trulyNewNodes)
+
+        // Connect the full original sequence using remapped IDs where applicable
         if nodesToAdd.count > 1 {
             for i in 0..<(nodesToAdd.count - 1) {
+                let srcID = effectiveID(nodesToAdd[i].id)
+                let tgtID = effectiveID(nodesToAdd[i + 1].id)
+                guard srcID != tgtID else { continue }
+                let alreadyConnected = edges.contains {
+                    ($0.sourceID == srcID && $0.targetID == tgtID) ||
+                    ($0.sourceID == tgtID && $0.targetID == srcID)
+                }
+                guard !alreadyConnected else { continue }
+                let edgeID = "e\(srcID)-\(tgtID)"
                 let edge = GraphEdge(
-                    id: "e\(nodesToAdd[i].id)-\(nodesToAdd[i+1].id)",
-                    sourceID: nodesToAdd[i].id,
-                    targetID: nodesToAdd[i+1].id,
+                    id: edgeID,
+                    sourceID: srcID,
+                    targetID: tgtID,
                     relationship: "관련",
                     style: EdgeStyle(strokeWidth: 1.5, animated: true, isUserCreated: true)
                 )
                 edges.append(edge)
+                generateEdgeRelationship(edgeID: edgeID)
             }
         }
 
-        // Auto-link new nodes to related existing nodes by tag overlap (Task 13)
-        autoLinkToExisting(newNodes: nodesToAdd, existingNodes: existingSnapshot)
+        // Auto-link truly new nodes to related existing nodes by tag overlap
+        autoLinkToExisting(newNodes: trulyNewNodes, existingNodes: existingSnapshot)
 
         persistGraph()
         isAddModalPresented = false
@@ -1404,6 +1500,42 @@ final class GraphViewModel {
             width:  basePanOffset.width  + translation.width,
             height: basePanOffset.height + translation.height
         )
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: - Node Placement Helpers
+    // ─────────────────────────────────────────────
+
+    /// Returns a canvas-space position near `candidate` that doesn't overlap any node in `occupied`.
+    /// Spirals outward in expanding rings until a free slot is found (max 60 attempts).
+    private func nonOverlappingPosition(
+        near candidate: CGPoint,
+        occupied: [CGPoint],
+        minDistance: CGFloat = 260
+    ) -> CGPoint {
+        guard !occupied.isEmpty else { return candidate }
+
+        func isFree(_ pt: CGPoint) -> Bool {
+            occupied.allSatisfy { other in
+                let dx = pt.x - other.x, dy = pt.y - other.y
+                return (dx * dx + dy * dy) >= (minDistance * minDistance)
+            }
+        }
+
+        if isFree(candidate) { return candidate }
+
+        let step: CGFloat = minDistance
+        for ring in 1...12 {
+            let r = step * CGFloat(ring)
+            let slices = max(8, ring * 6)
+            for s in 0..<slices {
+                let angle = (2 * CGFloat.pi / CGFloat(slices)) * CGFloat(s)
+                let pt = CGPoint(x: candidate.x + cos(angle) * r,
+                                 y: candidate.y + sin(angle) * r)
+                if isFree(pt) { return pt }
+            }
+        }
+        return candidate
     }
 
     // ─────────────────────────────────────────────

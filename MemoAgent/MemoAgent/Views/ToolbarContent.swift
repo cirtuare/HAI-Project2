@@ -150,7 +150,7 @@ struct NodeMindToolbar: ToolbarContent {
         Button {
             vm.isSettingsPresented = true
         } label: {
-            Image(systemName: "cpu")
+            Image(systemName: "gearshape")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(
                     AIProviderManager.shared.selectedProvider == .claudeAPI

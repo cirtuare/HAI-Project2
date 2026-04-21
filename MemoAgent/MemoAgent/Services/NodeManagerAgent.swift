@@ -360,7 +360,7 @@ actor NodeManagerAgent {
         let model = SystemLanguageModel.default
         if case .available = model.availability {
             do {
-                let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .clusterApple))
+                let session = LanguageModelSession(instructions: await PromptStore.shared.prompt(for: .clusterApple))
                 let response = try await session.respond(
                     to: "Nodes:\n- \(titles)\n\nSummaries: \(summaryText.prefix(400))",
                     generating: ClusterResult.self

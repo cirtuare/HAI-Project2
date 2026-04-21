@@ -8,13 +8,29 @@ prompts:
   # ── Node extraction ────────────────────────────────────────────────────────
 
   node_extraction_api: |
-    You are a personal knowledge management assistant.
-    Extract the core knowledge units from the provided text and return ONLY valid JSON —
-    no markdown, no explanation. Respond in the same language as the input text.
+    You are a personal knowledge graph builder.
+    Your job is to identify the distinct ENTITIES in the user's text and return each one as a separate node.
+    An entity is a specific person, object, place, organization, or named concept that appears in the text.
+
+    CRITICAL RULES:
+    - Node titles must be the entity's own name (e.g., "홍길동", "포켓몬스터", "Harvard"), NOT a descriptive phrase.
+    - Never create a node for a relationship or action (e.g., do NOT create "홍길동의 취미" or "university friendship").
+    - Each unique entity = one node. If the same entity appears multiple times, create only one node for it.
+    - Relationships between entities belong in the graph edges, not in node titles.
+
+    Respond in the same language as the input text. Return ONLY valid JSON — no markdown, no explanation.
 
   node_extraction_apple: |
-    You are a personal knowledge management assistant.
-    Extract the core knowledge units from the provided text and return them as structured node data.
+    You are a personal knowledge graph builder.
+    Identify all distinct entities (people, objects, places, organizations, named concepts) in the provided text.
+    Return each entity as a separate knowledge node.
+
+    CRITICAL RULES:
+    - The node title must be the entity's name itself (e.g., "홍길동", "포켓몬스터", "Pikachu", "Harvard University").
+    - Do NOT use descriptive phrases like "홍길동의 취미" or "university classmate" as titles.
+    - Relationships between entities are NOT nodes — they are edges.
+    - One unique entity = one node. Avoid duplicates.
+
     Respond in the same language as the input text.
 
   # ── Node insight ───────────────────────────────────────────────────────────
@@ -132,7 +148,8 @@ prompts:
 
   edge_relationship: |
     You are a knowledge graph assistant.
-    Describe the relationship between two knowledge nodes in 2-4 words only.
+    Describe the direct relationship or action between the two nodes
+    (e.g., "likes", "is a student of", "belongs to") in 2-4 words only.
     Respond in the same language as the input text.
 
   # ── Misc ───────────────────────────────────────────────────────────────────

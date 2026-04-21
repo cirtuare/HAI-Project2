@@ -3,6 +3,7 @@
 
 import SwiftUI
 import SwiftData
+import AppKit
 
 struct GraphCanvasView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -150,25 +151,21 @@ struct GraphCanvasView: View {
                 TapGesture()
                     .onEnded {
                         guard !didDrag else { return }
+                        let mods = NSEvent.modifierFlags
+                        let isMultiSelect = mods.contains(.shift) || mods.contains(.command)
                         if vm.connectingFromNodeID != nil {
                             vm.connectingTargetNodeID = node.id
                             withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
                                 vm.finishConnection()
                             }
+                        } else if isMultiSelect {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                vm.toggleSelection(of: node.id)
+                            }
                         } else {
                             withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                                 vm.selectNode(node.id, openInspector: true)
                             }
-                        }
-                    }
-            )
-            .simultaneousGesture(
-                TapGesture()
-                    .modifiers(.command)
-                    .onEnded {
-                        guard !didDrag else { return }
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            vm.toggleSelection(of: node.id)
                         }
                     }
             )

@@ -433,11 +433,14 @@ private struct EdgeActionButtons: View {
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
         )
         .position(point)
-        // Bug fix #1: keep panel visible while mouse is over it,
-        // even if it strays far from the edge path.
+        // Keep panel visible while mouse is over it; clear when mouse leaves
+        // so the button doesn't stay open when the cursor moves onto a node card
+        // (which blocks EdgeLayerView's onContinuousHover from firing).
         .onHover { isHovering in
             if isHovering {
                 vm.hoveredEdgeID = edge.id
+            } else {
+                vm.hoveredEdgeID = nil
             }
         }
     }

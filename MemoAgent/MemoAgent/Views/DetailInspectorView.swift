@@ -21,8 +21,8 @@ struct DetailInspectorView: View {
             Divider()
             if vm.selectedNodes.count == 1 {
                 singleNodeView(node: vm.selectedNodes[0])
-            } else {
-                promptComposerView
+            } else if vm.selectedNodes.count > 1 {
+                multiSelectView
             }
         }
         .background(Color(hex: "#0f172a"))  // surface-secondary
@@ -43,11 +43,10 @@ struct DetailInspectorView: View {
 
     private var header: some View {
         HStack {
-            Text(vm.selectedNodes.count > 1 ? "프롬프트 작성" : "노드 상세 정보")
+            Text(vm.selectedNodes.count > 1 ? "\(vm.selectedNodes.count)개 선택됨" : "노드 상세 정보")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
             Spacer()
-            // Delete button — only in single-node mode
             if vm.selectedNodes.count == 1, let node = vm.selectedNodes.first {
                 Button {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
@@ -62,6 +61,21 @@ struct DetailInspectorView: View {
                 }
                 .buttonStyle(.plain)
                 .help("노드 삭제")
+            } else if vm.selectedNodes.count > 1 {
+                // Bulk delete
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        vm.deleteSelectedNodes()
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(hex: "#f43f5e"))
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color(hex: "#f43f5e").opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .help("선택된 노드 모두 삭제")
             }
             Button {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
@@ -648,6 +662,111 @@ struct DetailInspectorView: View {
                 )
         )
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Multi-Select View (bulk actions)
+    // ─────────────────────────────────────────────
+
+    private var multiSelectView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Selected node chips
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("선택된 노드")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    FlowLayout(spacing: 6) {
+                        ForEach(vm.selectedNodes) { node in
+                            HStack(spacing: 5) {
+                                if let pid = node.personaIDs.first,
+                                   let hex = vm.personas.first(where: { $0.id == pid })?.accentColorHex {
+                                    Circle().fill(Color(hex: hex)).frame(width: 6, height: 6)
+                                }
+                                Text(node.title)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Button {
+                                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                                        vm.deselectNode(node.id)
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.primary.opacity(0.06))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Bulk persona assignment
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("페르소나 일괄 변경")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        // "없음" option
+                        Button {
+                            withAnimation { vm.assignPersonaToSelected(nil) }
+                        } label: {
+                            Text("없음")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.primary.opacity(0.06))
+                                )
+                        }
+                        .buttonStyle(.plain)
+
+                        ForEach(vm.personas) { persona in
+                            Button {
+                                withAnimation { vm.assignPersonaToSelected(persona.id) }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(Color(hex: persona.accentColorHex))
+                                        .frame(width: 8, height: 8)
+                                    Text(persona.name)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color(hex: persona.accentColorHex).opacity(0.12))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
     }
 
     // ─────────────────────────────────────────────

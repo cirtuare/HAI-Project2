@@ -483,8 +483,10 @@ struct SmartInputModalView: View {
                 .kerning(0.5)
 
             HStack(spacing: 6) {
-                // "없음" pill
-                personaPickerPill(id: nil, name: "없음", colorHex: "#64748b", icon: "person.slash")
+                // "자동 배정" — nil sentinel; commitModalNodes falls back to active/first persona
+                personaPickerPill(id: nil, name: "자동 배정", colorHex: "#06b6d4", icon: "wand.and.stars")
+                // "없음" — "" sentinel; commitModalNodes skips all fallbacks
+                personaPickerPill(id: "", name: "없음", colorHex: "#64748b", icon: "person.slash")
 
                 ForEach(vm.personas, id: \.id) { persona in
                     personaPickerPill(
@@ -554,7 +556,7 @@ struct SmartInputModalView: View {
                     ProgressSpinner()
                     Text("AI 분석 중...")
                 } else {
-                    Text("🫷 고민 전가하기")
+                    Text("분석하기")
                 }
             }
             .font(.system(size: 14, weight: .semibold))

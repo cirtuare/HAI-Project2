@@ -69,7 +69,7 @@ actor PersonaRouter {
 
     private func routeWithAppleIntelligence(_ query: String) async -> [PersonaType]? {
         do {
-            let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .personaRouterApple))
+            let session = LanguageModelSession(instructions: await PromptStore.shared.prompt(for: .personaRouterApple))
             let response = try await session.respond(
                 to: "Query: \(query.prefix(500))",
                 generating: RouterResult.self

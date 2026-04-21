@@ -366,7 +366,7 @@ actor DebateOrchestrator {
 
         if case .available = model.availability {
             // Sensitive cross-domain synthesis stays on-device
-            let session = LanguageModelSession(instructions: PromptStore.shared.prompt(for: .debateSynthesisApple))
+            let session = LanguageModelSession(instructions: await PromptStore.shared.prompt(for: .debateSynthesisApple))
             let response = try await session.respond(
                 to: "토론 요약:\n\(compressed)\n\n위 토론을 종합하여 핵심 원인과 행동 계획을 도출하세요.",
                 generating: DebateSynthesisResult.self
