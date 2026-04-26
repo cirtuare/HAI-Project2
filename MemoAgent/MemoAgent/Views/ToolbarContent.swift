@@ -24,9 +24,11 @@ struct NodeMindToolbar: ToolbarContent {
             searchField
         }
 
-        // ── Trailing: Settings + Add data ────────────────────────────────
+        // ── Trailing: Sync status + Chat + Settings + Add data ──────────────────
         ToolbarItem(placement: .primaryAction) {
             HStack(spacing: 8) {
+                syncStatusButton
+                chatButton
                 settingsButton
                 addDataButton
             }
@@ -93,11 +95,62 @@ struct NodeMindToolbar: ToolbarContent {
         .animation(.easeInOut(duration: 0.15), value: vm.searchQuery.isEmpty)
     }
 
+    private var syncStatusButton: some View {
+        Group {
+            if vm.isSyncing {
+                HStack(spacing: 5) {
+                    ProgressView().scaleEffect(0.6).tint(.cyan)
+                    Text("동기화 중")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.cyan)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.cyan.opacity(0.08))
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.cyan.opacity(0.2), lineWidth: 0.5))
+                )
+            } else if let date = vm.lastSyncDate {
+                Button { vm.triggerEcosystemSync() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10))
+                        Text(relativeTime(date))
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+                .help("마지막 동기화: \(date.formatted())")
+            } else if vm.activePersona != nil {
+                Button { vm.triggerEcosystemSync() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.3))
+                        .frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.white.opacity(0.05)))
+                }
+                .buttonStyle(.plain)
+                .help("Apple 생태계 동기화")
+            }
+        }
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let diff = Int(Date().timeIntervalSince(date))
+        if diff < 60 { return "방금" }
+        if diff < 3600 { return "\(diff / 60)분 전" }
+        return "\(diff / 3600)시간 전"
+    }
+
     private var settingsButton: some View {
         Button {
             vm.isSettingsPresented = true
         } label: {
-            Image(systemName: "cpu")
+            Image(systemName: "gearshape")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(
                     AIProviderManager.shared.selectedProvider == .claudeAPI
@@ -117,6 +170,44 @@ struct NodeMindToolbar: ToolbarContent {
         .buttonStyle(.plain)
         .help("AI 설정")
         .keyboardShortcut(",", modifiers: [.command])
+    }
+
+    private var chatButton: some View {
+        Button {
+            vm.openChat()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 12, weight: .medium))
+                if let persona = vm.activePersona {
+                    Circle()
+                        .fill(Color(hex: persona.accentColorHex))
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .foregroundStyle(vm.isChatPresented ? Color.cyan : Color.white.opacity(0.55))
+            .frame(width: 30, height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        vm.isChatPresented
+                            ? Color.cyan.opacity(0.15)
+                            : Color.primary.opacity(0.07)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                vm.isChatPresented
+                                    ? Color.cyan.opacity(0.4)
+                                    : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help("페르소나 채팅")
+        .keyboardShortcut("k", modifiers: [.command, .shift])
     }
 
     private var addDataButton: some View {

@@ -9,24 +9,38 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import PDFKit
+import SwiftData
 
 struct SmartInputModalView: View {
     @Environment(GraphViewModel.self) private var vm
-    @Environment(\.dismiss) private var dismiss
+
+    var availableWidth: CGFloat = 860
+
+    private var isNarrow: Bool { availableWidth < 900 }
 
     var body: some View {
         VStack(spacing: 0) {
             modalHeader
             Divider()
-            HStack(spacing: 0) {
-                inputColumn
-                    .frame(maxWidth: .infinity)
-                Divider()
-                processingColumn
-                    .frame(maxWidth: .infinity)
+            if isNarrow {
+                VStack(spacing: 0) {
+                    inputColumn
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    processingColumn
+                        .frame(maxWidth: .infinity, maxHeight: 220)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    inputColumn
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    processingColumn
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
-        .frame(width: 860, height: 560)
+        .frame(minWidth: 680, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
         .background(Color(hex: "#1e293b"))  // surface-elevated
         .colorScheme(.dark)  // force dark so .primary/.secondary resolve to white-family
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -58,7 +72,6 @@ struct SmartInputModalView: View {
             }
             Spacer()
             Button {
-                dismiss()
                 vm.isAddModalPresented = false
             } label: {
                 Image(systemName: "xmark")
@@ -98,20 +111,34 @@ struct SmartInputModalView: View {
 
             // Input area
             Group {
-                if vm.modalInputTab == .text {
-                    textInputArea
-                } else {
-                    fileDropArea
+                switch vm.modalInputTab {
+                case .text:       textInputArea
+                case .file:       fileDropArea
+                case .screenTime: screenTimeInputArea
+                case .finance:    financeInputArea
                 }
             }
             .padding(.horizontal, 20)
 
             Spacer()
 
-            // Analyse button
-            analyseButton
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+            // Persona picker — visible when at least one persona exists
+            if !vm.personas.isEmpty {
+                personaPickerRow
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 10)
+            }
+
+            // Action button (changes based on active tab)
+            Group {
+                switch vm.modalInputTab {
+                case .text, .file:  analyseButton
+                case .screenTime:   screenTimeSaveButton
+                case .finance:      financeSaveButton
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
         }
         .background(Color(hex: "#0f172a").opacity(0.5))
     }
@@ -167,6 +194,130 @@ struct SmartInputModalView: View {
                         )
                 )
         }
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Screen Time Tab
+    // ─────────────────────────────────────────────
+
+    private var screenTimeInputArea: some View {
+        @Bindable var vm = vm
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("iOS 스크린타임 주간 리포트를 붙여넣으세요", systemImage: "hourglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.5))
+
+            TextEditor(text: $vm.modalScreenTimeInput)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 200)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                )
+
+            if vm.modalScreenTimeSavedCount > 0 {
+                Label("\(vm.modalScreenTimeSavedCount)개의 노드가 저장되었습니다", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color(hex: "#1D9E75"))
+            }
+        }
+    }
+
+    private var screenTimeSaveButton: some View {
+        @Bindable var vm = vm
+        let isBusy = vm.modalScreenTimeSaving
+        return Button {
+            vm.commitScreenTimeReport()
+        } label: {
+            HStack(spacing: 8) {
+                if isBusy {
+                    ProgressSpinner()
+                    Text("저장 중...")
+                } else {
+                    Image(systemName: "hourglass")
+                    Text("스크린타임 저장")
+                }
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(isBusy ? Color.secondary : Color.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(isBusy ? Color.primary.opacity(0.08) : Color(hex: "#1D9E75"))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isBusy || vm.modalScreenTimeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Finance Tab
+    // ─────────────────────────────────────────────
+
+    private var financeInputArea: some View {
+        @Bindable var vm = vm
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("카드 명세서 또는 지출 내역 텍스트를 붙여넣으세요", systemImage: "creditcard.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.5))
+
+            TextEditor(text: $vm.modalFinanceInput)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 200)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                )
+
+            if vm.modalFinanceSavedCount > 0 {
+                Label("\(vm.modalFinanceSavedCount)건의 지출 항목이 저장되었습니다", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color(hex: "#EF9F27"))
+            }
+        }
+    }
+
+    private var financeSaveButton: some View {
+        @Bindable var vm = vm
+        let isBusy = vm.modalFinanceSaving
+        return Button {
+            vm.commitFinanceStatement()
+        } label: {
+            HStack(spacing: 8) {
+                if isBusy {
+                    ProgressSpinner()
+                    Text("분석 중...")
+                } else {
+                    Image(systemName: "creditcard.fill")
+                    Text("지출 내역 저장")
+                }
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(isBusy ? Color.secondary : Color.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(isBusy ? Color.primary.opacity(0.08) : Color(hex: "#EF9F27"))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isBusy || vm.modalFinanceInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     @State private var isDropTargeted = false
@@ -319,6 +470,82 @@ struct SmartInputModalView: View {
         vm.modalBodyInput = String(content.prefix(3000))
     }
 
+    // ─────────────────────────────────────────────
+    // MARK: Persona Picker Row
+    // ─────────────────────────────────────────────
+
+    private var personaPickerRow: some View {
+        @Bindable var vm = vm
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("담당 페르소나")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.35))
+                .kerning(0.5)
+
+            HStack(spacing: 6) {
+                // "자동 배정" — nil sentinel; commitModalNodes falls back to active/first persona
+                personaPickerPill(id: nil, name: "자동 배정", colorHex: "#06b6d4", icon: "wand.and.stars")
+                // "없음" — "" sentinel; commitModalNodes skips all fallbacks
+                personaPickerPill(id: "", name: "없음", colorHex: "#64748b", icon: "person.slash")
+
+                ForEach(vm.personas, id: \.id) { persona in
+                    personaPickerPill(
+                        id: persona.id,
+                        name: persona.name,
+                        colorHex: persona.accentColorHex,
+                        icon: persona.personaType?.icon ?? "person.fill"
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+        )
+    }
+
+    private func personaPickerPill(id: String?, name: String, colorHex: String, icon: String) -> some View {
+        let accent   = Color(hex: colorHex)
+        let isActive = vm.modalSelectedPersonaID == id
+
+        return Button {
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
+                vm.modalSelectedPersonaID = isActive ? nil : id
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(isActive ? .white : accent.opacity(0.8))
+                Text(name)
+                    .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? .white : Color.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isActive ? accent : accent.opacity(0.12))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(
+                                isActive ? Color.clear : accent.opacity(0.25),
+                                lineWidth: 0.5
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isActive)
+    }
+
     private var analyseButton: some View {
         let isProcessing = vm.modalProcessStep != .idle
         return Button {
@@ -329,8 +556,7 @@ struct SmartInputModalView: View {
                     ProgressSpinner()
                     Text("AI 분석 중...")
                 } else {
-                    Text("분석 시작")
-                    Image(systemName: "arrow.right")
+                    Text("분석하기")
                 }
             }
             .font(.system(size: 14, weight: .semibold))
@@ -353,10 +579,17 @@ struct SmartInputModalView: View {
 
     private var processingColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if vm.modalProcessStep == .idle {
-                idlePlaceholder
-            } else {
-                processingView
+            switch vm.modalInputTab {
+            case .text, .file:
+                if vm.modalProcessStep == .idle {
+                    idlePlaceholder
+                } else {
+                    processingView
+                }
+            case .screenTime:
+                screenTimeGuidePanel
+            case .finance:
+                financeGuidePanel
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -374,6 +607,64 @@ struct SmartInputModalView: View {
                 .foregroundStyle(Color.white.opacity(0.25))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var screenTimeGuidePanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("스크린타임 리포트 사용 방법", systemImage: "info.circle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(hex: "#1D9E75"))
+
+            guideStep("1", "iPhone → 설정 → 스크린 타임")
+            guideStep("2", "\"모든 활동 보기\" → 우측 상단 공유 버튼")
+            guideStep("3", "텍스트를 복사하여 왼쪽 입력란에 붙여넣기")
+
+            Divider().opacity(0.15)
+
+            Text("파싱 후 건강(health) 페르소나의\n노드로 자동 저장됩니다.")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.4))
+                .lineSpacing(4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var financeGuidePanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("지출 내역 입력 방법", systemImage: "info.circle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(hex: "#EF9F27"))
+
+            guideStep("1", "카드사 앱 → 이용 내역 → 텍스트 복사")
+            guideStep("2", "또는 PDF 명세서에서 텍스트 추출")
+            guideStep("3", "왼쪽 입력란에 붙여넣기 후 저장")
+
+            Divider().opacity(0.15)
+
+            Text("날짜·금액·가맹점명이 자동으로\n파싱되어 카테고리별로 분류됩니다.")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.4))
+                .lineSpacing(4)
+
+            Text("지원 형식: ₩X,XXX / X,XXX원 / X원")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.25))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func guideStep(_ number: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(number)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.9))
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.white.opacity(0.1)))
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.6))
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var processingView: some View {
@@ -654,6 +945,8 @@ private struct ProgressSpinner: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     SmartInputModalView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
 }

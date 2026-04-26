@@ -1,4 +1,6 @@
 .bkit/
+.claude/
+docs/superpowers/
 .DS_Store
 **/.DS_Store
 xcuserdata/

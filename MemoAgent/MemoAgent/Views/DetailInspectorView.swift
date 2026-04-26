@@ -7,6 +7,7 @@
 // Mirrors DetailDrawer.tsx in full.
 
 import SwiftUI
+import SwiftData
 
 struct DetailInspectorView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -20,8 +21,8 @@ struct DetailInspectorView: View {
             Divider()
             if vm.selectedNodes.count == 1 {
                 singleNodeView(node: vm.selectedNodes[0])
-            } else {
-                promptComposerView
+            } else if vm.selectedNodes.count > 1 {
+                multiSelectView
             }
         }
         .background(Color(hex: "#0f172a"))  // surface-secondary
@@ -42,11 +43,10 @@ struct DetailInspectorView: View {
 
     private var header: some View {
         HStack {
-            Text(vm.selectedNodes.count > 1 ? "프롬프트 작성" : "노드 상세 정보")
+            Text(vm.selectedNodes.count > 1 ? "\(vm.selectedNodes.count)개 선택됨" : "노드 상세 정보")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
             Spacer()
-            // Delete button — only in single-node mode
             if vm.selectedNodes.count == 1, let node = vm.selectedNodes.first {
                 Button {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
@@ -61,6 +61,21 @@ struct DetailInspectorView: View {
                 }
                 .buttonStyle(.plain)
                 .help("노드 삭제")
+            } else if vm.selectedNodes.count > 1 {
+                // Bulk delete
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        vm.deleteSelectedNodes()
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(hex: "#f43f5e"))
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color(hex: "#f43f5e").opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .help("선택된 노드 모두 삭제")
             }
             Button {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
@@ -146,6 +161,11 @@ struct DetailInspectorView: View {
 
                 Divider()
 
+                // Persona assignment
+                personaAssignmentSection(node: node)
+
+                Divider()
+
                 // AI Prompt generation section (single node)
                 aiPromptSection(node: node)
 
@@ -212,6 +232,120 @@ struct DetailInspectorView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: Persona Assignment Section (Task 1A/1B)
+    // ─────────────────────────────────────────────
+
+    @ViewBuilder
+    private func personaAssignmentSection(node: GraphNode) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("담당 페르소나", systemImage: "person.crop.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // Count badge when multiple are assigned
+                if node.personaIDs.count > 1 {
+                    Text("\(node.personaIDs.count)개")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.cyan.opacity(0.8))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.cyan.opacity(0.1)))
+                }
+            }
+
+            VStack(spacing: 4) {
+                // "없음 (전체 공유)" toggle — read from vm.nodes for live @Observable tracking
+                let livePersonaIDs = vm.nodes.first(where: { $0.id == node.id })?.personaIDs
+                                     ?? node.personaIDs
+                personaToggleRow(
+                    isOn: livePersonaIDs.isEmpty,
+                    label: "없음 (전체 공유)",
+                    icon: "globe",
+                    accentHex: "#64748b"
+                ) {
+                    vm.assignPersona(nil, to: node.id)
+                }
+
+                if !vm.personas.isEmpty {
+                    Divider()
+                        .opacity(0.3)
+                        .padding(.vertical, 2)
+
+                    ForEach(vm.personas, id: \.id) { persona in
+                        // Read personaIDs from vm.nodes directly so @Observable tracks
+                        // this access and re-renders when addPersona/removePersona fires.
+                        let liveIDs = vm.nodes.first(where: { $0.id == node.id })?.personaIDs
+                                      ?? node.personaIDs
+                        let isAssigned = liveIDs.contains(persona.id)
+                        personaToggleRow(
+                            isOn: isAssigned,
+                            label: persona.name,
+                            icon: persona.personaType?.icon ?? "person.fill",
+                            accentHex: persona.accentColorHex
+                        ) {
+                            if isAssigned {
+                                vm.removePersona(persona.id, from: node.id)
+                            } else {
+                                vm.addPersona(persona.id, to: node.id)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    private func personaToggleRow(
+        isOn: Bool,
+        label: String,
+        icon: String,
+        accentHex: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let accent = Color(hex: accentHex)
+        return Button(action: action) {
+            HStack(spacing: 9) {
+                // Persona icon badge
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isOn ? accent : accent.opacity(0.15))
+                        .frame(width: 22, height: 22)
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isOn ? .white : accent)
+                }
+
+                Text(label)
+                    .font(.system(size: 12, weight: isOn ? .semibold : .regular))
+                    .foregroundStyle(isOn ? .primary : Color.white.opacity(0.55))
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                // Checkmark
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(isOn ? accent : Color.white.opacity(0.2))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .animation(.easeInOut(duration: 0.15), value: isOn)
     }
 
     // ─────────────────────────────────────────────
@@ -531,6 +665,111 @@ struct DetailInspectorView: View {
     }
 
     // ─────────────────────────────────────────────
+    // MARK: Multi-Select View (bulk actions)
+    // ─────────────────────────────────────────────
+
+    private var multiSelectView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Selected node chips
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("선택된 노드")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    FlowLayout(spacing: 6) {
+                        ForEach(vm.selectedNodes) { node in
+                            HStack(spacing: 5) {
+                                if let pid = node.personaIDs.first,
+                                   let hex = vm.personas.first(where: { $0.id == pid })?.accentColorHex {
+                                    Circle().fill(Color(hex: hex)).frame(width: 6, height: 6)
+                                }
+                                Text(node.title)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Button {
+                                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                                        vm.deselectNode(node.id)
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.primary.opacity(0.06))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Bulk persona assignment
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("페르소나 일괄 변경")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        // "없음" option
+                        Button {
+                            withAnimation { vm.assignPersonaToSelected(nil) }
+                        } label: {
+                            Text("없음")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.primary.opacity(0.06))
+                                )
+                        }
+                        .buttonStyle(.plain)
+
+                        ForEach(vm.personas) { persona in
+                            Button {
+                                withAnimation { vm.assignPersonaToSelected(persona.id) }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(Color(hex: persona.accentColorHex))
+                                        .frame(width: 8, height: 8)
+                                    Text(persona.name)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color(hex: persona.accentColorHex).opacity(0.12))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    // ─────────────────────────────────────────────
     // MARK: Prompt Composer (multi-node)
     // ─────────────────────────────────────────────
 
@@ -712,17 +951,11 @@ struct DetailInspectorView: View {
 }
 
 #Preview {
-    struct PreviewWrapper: View {
-        @State var vm: GraphViewModel = {
-            let vm = GraphViewModel()
-            vm.selectNode("1")
-            return vm
-        }()
-        var body: some View {
-            DetailInspectorView()
-                .environment(vm)
-                .frame(width: 360, height: 700)
-        }
-    }
-    return PreviewWrapper()
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let vm = GraphViewModel(modelContext: container.mainContext)
+    vm.selectNode("1")
+    return DetailInspectorView()
+        .environment(vm)
+        .frame(width: 360, height: 700)
 }

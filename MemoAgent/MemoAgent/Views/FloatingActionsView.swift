@@ -5,6 +5,7 @@
 // spring-animates in/out, offers connect / disconnect / prompt actions.
 
 import SwiftUI
+import SwiftData
 
 struct FloatingActionsView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -158,22 +159,16 @@ struct FloatingActionsView: View {
 }
 
 #Preview {
-    struct PreviewWrapper: View {
-        @State var vm: GraphViewModel = {
-            let vm = GraphViewModel()
-            vm.selectNode("1")
-            vm.toggleSelection(of: "2")
-            vm.toggleSelection(of: "3")
-            return vm
-        }()
-        var body: some View {
-            ZStack {
-                Color(hex: "#020617")
-                FloatingActionsView()
-                    .environment(vm)
-            }
-            .frame(width: 700, height: 400)
-        }
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let vm = GraphViewModel(modelContext: container.mainContext)
+    vm.selectNode("1")
+    vm.toggleSelection(of: "2")
+    vm.toggleSelection(of: "3")
+    return ZStack {
+        Color(hex: "#020617")
+        FloatingActionsView()
+            .environment(vm)
     }
-    return PreviewWrapper()
+    .frame(width: 700, height: 400)
 }

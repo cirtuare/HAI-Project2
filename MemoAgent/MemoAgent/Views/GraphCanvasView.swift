@@ -2,6 +2,8 @@
 // MemoAgent — Phase 4: Full Interactive Graph Canvas
 
 import SwiftUI
+import SwiftData
+import AppKit
 
 struct GraphCanvasView: View {
     @Environment(GraphViewModel.self) private var vm
@@ -45,6 +47,48 @@ struct GraphCanvasView: View {
                 }
 
                 FloatingActionsView()
+
+                // Debate progress banner — appears at top when agents are analyzing
+                if vm.debateStatus != nil {
+                    DebateStatusBanner()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 14)
+                        .allowsHitTesting(false)
+                        .zIndex(50)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8),
+                                   value: vm.debateStatus != nil)
+                }
+
+                // Persona blob mini-visualization — top-right, always visible
+                PersonaBlobOverlay()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 12)
+                    .padding(.trailing, 14)
+                    .allowsHitTesting(false)
+                    .zIndex(8)
+
+                // Persona suggestion banner — appears below debate banner
+                if vm.pendingPersonaSuggestion != nil {
+                    PersonaSuggestionBanner(
+                        onAccept: { personaType in
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                let record = PersonaRecord.make(from: personaType)
+                                vm.createPersona(record)
+                                vm.pendingPersonaSuggestion = nil
+                            }
+                        },
+                        onDismiss: {
+                            withAnimation { vm.pendingPersonaSuggestion = nil }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, vm.debateStatus != nil ? 60 : 14)
+                    .zIndex(49)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8),
+                               value: vm.pendingPersonaSuggestion != nil)
+                }
             }
             .gesture(canvasPanGesture)
             .gesture(magnifyGesture)
@@ -75,8 +119,12 @@ struct GraphCanvasView: View {
                     y: basePos.y + dragTranslation.height
                   )
                 : basePos
-            let isSelected = vm.selectedNodeIDs.contains(node.id)
-            let isTarget   = vm.connectingTargetNodeID == node.id
+            let isSelected       = vm.selectedNodeIDs.contains(node.id)
+            let isTarget         = vm.connectingTargetNodeID == node.id
+            let isDebateEvidence = vm.debateEvidenceNodeIDs.contains(node.id)
+            let personaColors: [Color] = node.personaIDs.compactMap { pid in
+                vm.personas.first(where: { $0.id == pid }).map { Color(hex: $0.accentColorHex) }
+            }
 
             ZStack {
                 NodeCardView(
@@ -84,6 +132,8 @@ struct GraphCanvasView: View {
                     isSelected: isSelected,
                     isConnectionTarget: isTarget,
                     searchOpacity: vm.searchOpacity(for: node),
+                    isDebateEvidence: isDebateEvidence,
+                    personaColors: personaColors,
                     onDelete: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             vm.deleteNode(id: node.id)
@@ -101,25 +151,21 @@ struct GraphCanvasView: View {
                 TapGesture()
                     .onEnded {
                         guard !didDrag else { return }
+                        let mods = NSEvent.modifierFlags
+                        let isMultiSelect = mods.contains(.shift) || mods.contains(.command)
                         if vm.connectingFromNodeID != nil {
                             vm.connectingTargetNodeID = node.id
                             withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
                                 vm.finishConnection()
                             }
+                        } else if isMultiSelect {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                vm.toggleSelection(of: node.id)
+                            }
                         } else {
                             withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                                 vm.selectNode(node.id, openInspector: true)
                             }
-                        }
-                    }
-            )
-            .simultaneousGesture(
-                TapGesture()
-                    .modifiers(.command)
-                    .onEnded {
-                        guard !didDrag else { return }
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            vm.toggleSelection(of: node.id)
                         }
                     }
             )
@@ -247,6 +293,73 @@ private struct ConnectionHandle: View {
     }
 }
 
+// MARK: - PersonaBlobOverlay
+
+/// Top-right mini visualization showing active personas and their node counts.
+/// Each persona appears as a small colored pill; the active one is highlighted.
+private struct PersonaBlobOverlay: View {
+    @Environment(GraphViewModel.self) private var vm
+
+    // Personas that have at least one node visible in the current view
+    private var activePersonas: [(PersonaRecord, Int)] {
+        vm.personas.compactMap { persona in
+            let count = vm.visibleNodes.filter { $0.personaIDs.contains(persona.id) }.count
+            guard count > 0 else { return nil }
+            return (persona, count)
+        }
+    }
+
+    var body: some View {
+        if !activePersonas.isEmpty {
+            HStack(spacing: 5) {
+                ForEach(activePersonas, id: \.0.id) { persona, count in
+                    personaPill(persona: persona, count: count)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color(hex: "#020617").opacity(0.75))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5)
+                    )
+            )
+            .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
+            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+            .animation(.spring(response: 0.35, dampingFraction: 0.8),
+                       value: activePersonas.map { $0.0.id })
+        }
+    }
+
+    private func personaPill(persona: PersonaRecord, count: Int) -> some View {
+        let accent = Color(hex: persona.personaType?.accentHex ?? "#64748b")
+        let isActive = vm.activePersona?.id == persona.id
+
+        return HStack(spacing: 4) {
+            // Colored dot
+            Circle()
+                .fill(accent)
+                .frame(width: isActive ? 7 : 5, height: isActive ? 7 : 5)
+                .shadow(color: accent.opacity(0.6), radius: isActive ? 4 : 0)
+
+            if isActive {
+                Text(persona.name)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text("·")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.white.opacity(0.3))
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.5))
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isActive)
+    }
+}
+
 // MARK: - DotGridView
 
 struct DotGridView: View {
@@ -279,7 +392,9 @@ struct DotGridView: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(for: NodeRecord.self, EdgeRecord.self, PersonaRecord.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     GraphCanvasView()
-        .environment(GraphViewModel())
+        .environment(GraphViewModel(modelContext: container.mainContext))
         .frame(width: 1100, height: 700)
 }
