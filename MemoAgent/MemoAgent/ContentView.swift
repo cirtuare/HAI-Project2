@@ -118,6 +118,7 @@ struct ContentView: View {
                 DebateResultPanel(onDismiss: {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                         vm.activeDebateResult = nil
+                        vm.isLiveDebatePresented = false
                     }
                 })
                 .padding(.bottom, 20)

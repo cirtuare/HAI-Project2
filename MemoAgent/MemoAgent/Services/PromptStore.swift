@@ -35,6 +35,13 @@ enum PromptKey: String {
     case debateSynthesisApple    = "debate_synthesis_apple"
     case debateSynthesisAPI      = "debate_synthesis_api"
 
+    // Debate: HITL synthesis with game theory (replaces Round 3 in manual debate)
+    case debateSynthesisHITLApple = "debate_synthesis_hitl_apple"
+    case debateSynthesisHITLAPI   = "debate_synthesis_hitl_api"
+
+    // Debate: re-synthesis after human answers reverse questions
+    case debateHumanContinue     = "debate_human_continue"
+
     // Node clustering (NodeManagerAgent)
     case clusterApple            = "cluster_apple"
     case clusterAPI              = "cluster_api"

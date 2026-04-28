@@ -43,8 +43,22 @@ struct MemoAgentApp: App {
     @State private var viewModel: GraphViewModel = {
         let ctx = MemoAgentApp.container.mainContext
         MigrationService.migratePersonaTypesIfNeeded(context: ctx)
-        return GraphViewModel(modelContext: ctx)
+        let vm = GraphViewModel(modelContext: ctx)
+        Self.bootstrapDefaultProvider()
+        return vm
     }()
+
+    private static func bootstrapDefaultProvider() {
+        let mgr = AIProviderManager.shared
+        // Set OpenAI as default if not already chosen
+        if UserDefaults.standard.string(forKey: "memoagent.ai.provider.v1") == nil {
+            mgr.selectedProvider = .openAI
+        }
+        // Pre-populate keychain if key is missing
+        if mgr.loadAPIKey(for: .openAI) == nil, !Secrets.openAIKey.isEmpty {
+            mgr.saveAPIKey(Secrets.openAIKey, for: .openAI)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {

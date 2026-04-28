@@ -18,7 +18,11 @@ struct LiveDebateView: View {
             turnList
             if vm.debateStatus == nil {
                 Divider().background(Color.white.opacity(0.08))
-                completeFooter
+                if vm.activeDebateResult != nil {
+                    completeFooter
+                } else {
+                    failedFooter
+                }
             }
         }
         .frame(minWidth: 520, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
@@ -42,24 +46,41 @@ struct LiveDebateView: View {
             if vm.debateStatus != nil {
                 DebateOrbView()
                     .frame(width: 20, height: 20)
-            } else {
+            } else if vm.activeDebateResult != nil {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 16))
                     .foregroundStyle(.green)
+            } else {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.red)
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(vm.debateStatus != nil ? "AI 멀티 에이전트 토론 진행 중" : "토론 완료")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.9))
+                Group {
+                    if vm.debateStatus != nil {
+                        Text("AI 멀티 에이전트 토론 진행 중")
+                    } else if vm.activeDebateResult != nil {
+                        Text("토론 완료")
+                    } else {
+                        Text("토론 실패")
+                    }
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.9))
+
                 if let status = vm.debateStatus {
                     Text(status)
                         .font(.system(size: 11))
                         .foregroundStyle(Color.white.opacity(0.45))
-                } else {
+                } else if vm.activeDebateResult != nil {
                     Text("\(vm.liveDebateTurns.count)개 분석 완료")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.white.opacity(0.45))
+                } else {
+                    Text("AI 응답 생성 중 오류가 발생했습니다")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.red.opacity(0.7))
                 }
             }
 
@@ -172,6 +193,31 @@ struct LiveDebateView: View {
         .padding(.vertical, 12)
         .background(Color.white.opacity(0.02))
     }
+
+    private var failedFooter: some View {
+        HStack(spacing: 12) {
+            Text("결과를 생성하지 못했습니다. API 키 또는 네트워크를 확인해 주세요.")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.red.opacity(0.7))
+            Spacer()
+            Button {
+                vm.isLiveDebatePresented = false
+            } label: {
+                Text("닫기")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule().fill(Color(hex: "#64748b"))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(Color.red.opacity(0.04))
+    }
 }
 
 // MARK: - DebateTurnBubble
@@ -179,6 +225,9 @@ struct LiveDebateView: View {
 private struct DebateTurnBubble: View {
     let turn: AgentTurn
     let index: Int
+    @State private var isExpanded = false
+
+    private let truncateLimit = 280
 
     // Alternate sides: even index = left, odd = right
     private var isLeft: Bool { index % 2 == 0 }
@@ -191,6 +240,11 @@ private struct DebateTurnBubble: View {
         }
     }
     private var accent: Color { domainColor(turn.domain) }
+    private var shouldTruncate: Bool { turn.content.count > truncateLimit }
+    private var displayText: String {
+        guard shouldTruncate && !isExpanded else { return turn.content }
+        return String(turn.content.prefix(truncateLimit)) + "…"
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -213,20 +267,39 @@ private struct DebateTurnBubble: View {
                 }
 
                 // Content bubble
-                Text(turn.content.prefix(300) + (turn.content.count > 300 ? "..." : ""))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(accent.opacity(0.09))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(accent.opacity(0.25), lineWidth: 0.5)
-                            )
-                    )
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: isLeft ? .leading : .trailing, spacing: 6) {
+                    Text(displayText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if shouldTruncate {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                isExpanded.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text(isExpanded ? "접기" : "더보기")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundStyle(accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(accent.opacity(0.09))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(accent.opacity(0.25), lineWidth: 0.5)
+                        )
+                )
 
                 // Confidence
                 if turn.confidence > 0 {

@@ -81,6 +81,9 @@ struct DebateResultPanel: View {
     @Environment(GraphViewModel.self) private var vm
     let onDismiss: () -> Void
 
+    @State private var expandedAgents: Set<Int> = []
+    @State private var showFullRaw = false
+
     private var synthesis: DebateSynthesisDisplay? {
         guard let json = vm.activeDebateResult else { return nil }
         return parseSynthesis(json)
@@ -109,7 +112,8 @@ struct DebateResultPanel: View {
                 }
             }
         }
-        .frame(width: 320)
+        .frame(width: 380)
+        .frame(maxHeight: 620)
         .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -129,16 +133,20 @@ struct DebateResultPanel: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
 
-            ForEach(Array(analysisTurns.enumerated()), id: \.offset) { _, turn in
-                agentPositionCard(turn)
+            ForEach(Array(analysisTurns.enumerated()), id: \.offset) { index, turn in
+                agentPositionCard(turn, index: index)
             }
         }
         .padding(.bottom, 8)
     }
 
-    private func agentPositionCard(_ turn: AgentTurn) -> some View {
+    private func agentPositionCard(_ turn: AgentTurn, index: Int) -> some View {
         let accent = domainAccent(turn.domain)
-        let preview = String(turn.content.prefix(120)) + (turn.content.count > 120 ? "…" : "")
+        let needsTruncation = turn.content.count > 120
+        let isExpanded = expandedAgents.contains(index)
+        let displayText = (isExpanded || !needsTruncation)
+            ? turn.content
+            : String(turn.content.prefix(120)) + "…"
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: domainIcon(turn.domain))
@@ -152,10 +160,20 @@ struct DebateResultPanel: View {
                     .font(.system(size: 9))
                     .foregroundStyle(accent.opacity(0.7))
             }
-            Text(preview)
+            Text(displayText)
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.65))
                 .fixedSize(horizontal: false, vertical: true)
+            if needsTruncation {
+                Button {
+                    if isExpanded { expandedAgents.remove(index) } else { expandedAgents.insert(index) }
+                } label: {
+                    Text(isExpanded ? "접기" : "더보기")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(accent)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(10)
         .background(
@@ -243,23 +261,44 @@ struct DebateResultPanel: View {
 
             Divider().background(Color.white.opacity(0.08))
 
-            // Action items
+            // Action items with utility scores
             VStack(alignment: .leading, spacing: 6) {
-                Label("실행 계획", systemImage: "checklist")
+                Label("실행 계획 (기대 효용 순)", systemImage: "checklist")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color(hex: "#22c55e"))
 
                 ForEach(Array(s.actions.enumerated()), id: \.offset) { i, action in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(i + 1)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color(hex: "#f97316"))
-                            .frame(width: 14, height: 14)
-                            .background(Circle().fill(Color(hex: "#f97316").opacity(0.15)))
-                        Text(action)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .fixedSize(horizontal: false, vertical: true)
+                    let scoreCount = s.actionScores?.count ?? 0
+                    let score: Double? = scoreCount > i ? s.actionScores![i] : nil
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(i + 1)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color(hex: "#f97316"))
+                                .frame(width: 14, height: 14)
+                                .background(Circle().fill(Color(hex: "#f97316").opacity(0.15)))
+                            Text(action)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            if let sc = score {
+                                Text("\(Int(sc * 100))%")
+                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(utilityColor(sc))
+                            }
+                        }
+                        if let sc = score {
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.white.opacity(0.06))
+                                        .frame(height: 3)
+                                    Capsule().fill(utilityColor(sc))
+                                        .frame(width: geo.size.width * sc, height: 3)
+                                }
+                            }
+                            .frame(height: 3)
+                        }
                     }
                 }
             }
@@ -268,7 +307,18 @@ struct DebateResultPanel: View {
             urgencyBadge(s.urgency)
                 .frame(maxWidth: .infinity, alignment: .trailing)
 
+            // Feedback slider (A ↔ B persona lean)
+            if analysisTurns.count >= 2 {
+                feedbackSliderSection(analysisTurns[0], analysisTurns[1])
+            }
+
             Divider().background(Color.white.opacity(0.08))
+
+            // Human-in-the-Loop section (if no consensus)
+            if vm.debateNeedsHumanInput && !(vm.debateReverseQuestions.isEmpty) {
+                humanInTheLoopSection
+                Divider().background(Color.white.opacity(0.08))
+            }
 
             // Continue chat buttons — one per active persona
             VStack(spacing: 6) {
@@ -305,8 +355,223 @@ struct DebateResultPanel: View {
                     }
                 }
             }
+
+            // Reset button
+            Button {
+                vm.resetDebate()
+                onDismiss()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 9))
+                    Text("처음부터 다시")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(Color.white.opacity(0.3))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
+    }
+
+    // MARK: Utility bar color
+
+    private func utilityColor(_ score: Double) -> Color {
+        if score >= 0.75 { return Color(hex: "#22c55e") }
+        if score >= 0.50 { return Color(hex: "#f59e0b") }
+        return Color(hex: "#f43f5e")
+    }
+
+    // MARK: Feedback Slider
+
+    private func feedbackSliderSection(_ turnA: AgentTurn, _ turnB: AgentTurn) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("어느 관점에 더 공감하시나요?", systemImage: "slider.horizontal.3")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+
+            HStack(spacing: 8) {
+                Text(domainName(turnA.domain))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(domainAccent(turnA.domain))
+                    .frame(width: 28, alignment: .leading)
+
+                Slider(
+                    value: Binding(
+                        get: { vm.debateFeedbackSlider },
+                        set: { vm.debateFeedbackSlider = $0 }
+                    ),
+                    in: 0...1
+                )
+                .tint(
+                    vm.debateFeedbackSlider < 0.5
+                        ? domainAccent(turnA.domain)
+                        : domainAccent(turnB.domain)
+                )
+
+                Text(domainName(turnB.domain))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(domainAccent(turnB.domain))
+                    .frame(width: 28, alignment: .trailing)
+            }
+
+            let leaning: String = {
+                let v = vm.debateFeedbackSlider
+                if v < 0.35 { return "\(domainName(turnA.domain)) 관점 선호" }
+                if v > 0.65 { return "\(domainName(turnB.domain)) 관점 선호" }
+                return "두 관점 균형"
+            }()
+            Text(leaning)
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.35))
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: Human-in-the-Loop section
+
+    private var humanInTheLoopSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: "#f59e0b").opacity(0.15))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "person.2.wave.2")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#f59e0b"))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("인간 판단이 필요합니다")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#f59e0b"))
+                    Text("에이전트들이 합의에 도달하지 못했습니다")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+            }
+
+            // Questions
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(vm.debateReverseQuestions.enumerated()), id: \.offset) { i, q in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("Q\(i + 1)")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#f59e0b"))
+                            .frame(width: 20, height: 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(hex: "#f59e0b").opacity(0.15))
+                            )
+                        Text(q)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(hex: "#f59e0b").opacity(0.05))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color(hex: "#f59e0b").opacity(0.18), lineWidth: 0.5)
+                            )
+                    )
+                }
+            }
+
+            // Answer TextField — white background, black text for readability
+            VStack(alignment: .leading, spacing: 4) {
+                Text("내 답변")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.4))
+
+                TextField("여기에 답변을 입력하세요…", text: Binding(
+                    get: { vm.debateHumanAnswer },
+                    set: { vm.debateHumanAnswer = $0 }
+                ), axis: .vertical)
+                .lineLimit(4...6)
+                .font(.system(size: 12))
+                .foregroundColor(.black)
+                .colorScheme(.light)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(
+                                    vm.debateHumanAnswer.isEmpty
+                                        ? Color(hex: "#f59e0b").opacity(0.3)
+                                        : Color(hex: "#f59e0b").opacity(0.6),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+
+            // Action buttons
+            HStack(spacing: 8) {
+                let isEmpty = vm.debateHumanAnswer.trimmingCharacters(in: .whitespaces).isEmpty
+
+                Button {
+                    vm.submitDebateHumanAnswer()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 10))
+                        Text("답변 제출")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(isEmpty ? Color.black.opacity(0.3) : Color.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(isEmpty
+                            ? Color(hex: "#f59e0b").opacity(0.3)
+                            : Color(hex: "#f59e0b"))
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isEmpty)
+
+                Spacer()
+
+                Button {
+                    vm.resetDebate()
+                    onDismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 9))
+                        Text("처음부터")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.white.opacity(0.35))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(Color.white.opacity(0.06))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(hex: "#f59e0b").opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color(hex: "#f59e0b").opacity(0.15), lineWidth: 0.5)
+                )
+        )
     }
 
     private func urgencyBadge(_ urgency: String) -> some View {
@@ -329,11 +594,24 @@ struct DebateResultPanel: View {
     // MARK: Raw fallback (when JSON parse fails)
 
     private var rawFallback: some View {
-        Text(vm.activeDebateResult ?? "")
-            .font(.system(size: 11))
-            .foregroundStyle(.white.opacity(0.6))
-            .lineLimit(8)
-            .padding(14)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(vm.activeDebateResult ?? "")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(showFullRaw ? nil : 8)
+                .fixedSize(horizontal: false, vertical: true)
+            if (vm.activeDebateResult?.count ?? 0) > 0 {
+                Button {
+                    showFullRaw.toggle()
+                } label: {
+                    Text(showFullRaw ? "접기" : "더보기")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color(hex: "#64748b"))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
     }
 
     // MARK: Background
@@ -358,7 +636,10 @@ struct DebateResultPanel: View {
 private struct DebateSynthesisDisplay: Decodable {
     let rootCause: String
     let actions: [String]
+    let actionScores: [Double]?
     let urgency: String
+    let consensusReached: Bool?
+    let reverseQuestions: [String]?
 }
 
 // MARK: - PersonaSuggestionBanner

@@ -153,7 +153,7 @@ final class AIProviderManager {
     var selectedProvider: AIProvider {
         get {
             let raw = UserDefaults.standard.string(forKey: defaultsKey) ?? ""
-            return AIProvider(rawValue: raw) ?? .claudeAPI
+            return AIProvider(rawValue: raw) ?? .openAI
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
